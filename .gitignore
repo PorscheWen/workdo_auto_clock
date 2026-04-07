@@ -1,3 +1,36 @@
 notebooks/data
 notebooks/cifar_net.pth
 .ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# Environment Variables (重要！不要提交密碼)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+

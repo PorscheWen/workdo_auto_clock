@@ -7,3 +7,6 @@ tqdm==4.66.4
 pillow>=12.1.1
 fonttools>=4.60.0
 filelock>=3.20.3
+requests>=2.31.0
+schedule>=1.2.0
+python-dotenv>=1.0.0
