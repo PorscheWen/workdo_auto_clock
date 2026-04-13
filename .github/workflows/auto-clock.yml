@@ -14,26 +14,28 @@ on:
       action:
         description: '執行動作'
         required: true
-        default: 'in'
+        default: 'auto'
         type: choice
         options:
           - in
           - out
           - status
+          - check-missing
+          - auto
 
 env:
   WORKDO_EMAIL: ${{ secrets.WORKDO_EMAIL }}
   WORKDO_PASSWORD: ${{ secrets.WORKDO_PASSWORD }}
-  WORKDO_COMPANY_ID: ${{ secrets.WORKDO_COMPANY_ID }}
-  WORKDO_API_URL: ${{ secrets.WORKDO_API_URL }}
+  WORKDO_GPS_LOCATION: ${{ secrets.WORKDO_GPS_LOCATION }}
+  WORKDO_GPS_PLACE: ${{ secrets.WORKDO_GPS_PLACE }}
+  WORKDO_USE_LEAVE_API: ${{ secrets.WORKDO_USE_LEAVE_API }}
+  LEAVE_DAYS_JSON: ${{ secrets.LEAVE_DAYS_JSON }}
+  # 使用 Node.js 24 避免棄用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  clock-in:
+  auto-clock:
     runs-on: ubuntu-latest
-    # 只在上班時間的 cron 或手動選擇 'in' 時執行
-    if: |
-      (github.event.schedule == '0 1 * * 1-5') || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'in')
     
     steps:
       - name: 檢出程式碼
@@ -49,72 +51,34 @@ jobs:
         run: |
           pip install -r requirements.txt
       
-      - name: 執行上班打卡
+      - name: 建立請假日設定檔
+        if: env.LEAVE_DAYS_JSON != ''
         run: |
-          python workdo_auto_clock.py in
+          echo '${{ secrets.LEAVE_DAYS_JSON }}' > leave_days.json
+      
+      - name: 判斷執行動作
+        id: determine-action
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 1 * * 1-5" ]; then
+            echo "action=in" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 10 * * 1-5" ]; then
+            echo "action=out" >> $GITHUB_OUTPUT
+          else
+            echo "action=auto" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 執行打卡
+        run: |
+          python workdo_auto_clock.py ${{ steps.determine-action.outputs.action }}
       
       - name: 上傳日誌
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clock-in-log-${{ github.run_number }}
+          name: workdo-log-${{ github.run_number }}
           path: |
             *.log
           retention-days: 7
 
-  clock-out:
-    runs-on: ubuntu-latest
-    # 只在下班時間的 cron 或手動選擇 'out' 時執行
-    if: |
-      (github.event.schedule == '0 10 * * 1-5') || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'out')
-    
-    steps:
-      - name: 檢出程式碼
-        uses: actions/checkout@v4
-      
-      - name: 設定 Python 環境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-          cache: 'pip'
-      
-      - name: 安裝依賴套件
-        run: |
-          pip install -r requirements.txt
-      
-      - name: 執行下班打卡
-        run: |
-          python workdo_auto_clock.py out
-      
-      - name: 上傳日誌
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: clock-out-log-${{ github.run_number }}
-          path: |
-            *.log
-          retention-days: 7
-
-  check-status:
-    runs-on: ubuntu-latest
-    # 只在手動選擇 'status' 時執行
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'status'
-    
-    steps:
-      - name: 檢出程式碼
-        uses: actions/checkout@v4
-      
-      - name: 設定 Python 環境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-          cache: 'pip'
-      
-      - name: 安裝依賴套件
-        run: |
-          pip install -r requirements.txt
-      
-      - name: 查詢打卡狀態
-        run: |
-          python workdo_auto_clock.py status

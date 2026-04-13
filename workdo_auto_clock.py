@@ -1,153 +1,305 @@
 #!/usr/bin/env python3
 """
-Workdo API 自動打卡程式
-可直接在命令列執行，無需 Jupyter Notebook
+Workdo 自動打卡系統
+參考: https://github.com/akitosun/WorkDoAuto
 """
 
 import os
 import sys
+import json
 import argparse
 import requests
-import schedule
-import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import logging
+
+# 設定日誌
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('workdo_clock.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 class WorkdoAPI:
     """Workdo API 自動打卡類別"""
     
+    # API 端點
+    BASE_URL = "https://www.workdo.co"
+    LOGIN_URL = f"{BASE_URL}/bdddweb/api/dweb/BDD771M/userLogin"
+    PUNCH_URL = f"{BASE_URL}/ccndweb/api/dweb/CCN102M/saveFromCreate102M3"
+    STATUS_URL = f"{BASE_URL}/ccndweb/api/dweb/CCN102M/execute102M2FromMenu"
+    HOLIDAY_URL = f"{BASE_URL}/bddaweb/api/aweb/BDD901W/queryFromQuery901W2"
+    MISSING_PUNCH_QUERY_URL = f"{BASE_URL}/ccnraweb/api/aweb/CCN002W/queryFromQuery002W1"
+    MISSING_PUNCH_SAVE_URL = f"{BASE_URL}/ccndweb/api/dweb/CCN102M/saveFromCreate102M4"
+    
     def __init__(self):
         self.email = os.getenv('WORKDO_EMAIL')
         self.password = os.getenv('WORKDO_PASSWORD')
-        self.company_id = os.getenv('WORKDO_COMPANY_ID')
-        self.api_url = os.getenv('WORKDO_API_URL', 'https://api.workdo.co')
-        self.token = None
-        self.session = requests.Session()
+        self.gps_location = os.getenv('WORKDO_GPS_LOCATION', '25.033,121.564')
+        self.gps_place = os.getenv('WORKDO_GPS_PLACE', '台北市信義區')
+        self.use_leave_api = os.getenv('WORKDO_USE_LEAVE_API', 'false').lower() == 'true'
         
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json;charset=UTF-8',
+            'tenant_id': 'aa6pd97f',
+            'timezone': 'GMT+0800',
+            'brandName': 'WorkDo',
+            'app_version_code': 'wd_aweb_7.6.20',
+            'userLocale': 'zh_TW',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Dest': 'empty',
+            'sec-ch-ua': '"Google Chrome";v="100", "Not?A_Brand";v="8", "Chromium";v="100"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+        })
+    
     def login(self):
-        """登入 Workdo 取得存取權杖"""
+        """登入 Workdo 取得 Cookie"""
         try:
-            url = f"{self.api_url}/api/v1/auth/login"
-            payload = {
-                'email': self.email,
+            login_data = {
+                'clientType': 'Web',
+                'clientModel': 'Chrome 100.0.4896.127',
+                'clientOs': 'Windows 10',
+                'appVersion': 'wd_aweb_7.6.20',
+                'timeZone': 'GMT+0800',
+                'loginEmail': self.email,
                 'password': self.password,
-                'company_id': self.company_id
+                'loginId': self.email,
+                'loginPhone': None
             }
-            response = self.session.post(url, json=payload)
+            
+            logger.info("🔐 正在登入...")
+            response = self.session.post(self.LOGIN_URL, json=login_data)
             response.raise_for_status()
             
             data = response.json()
-            self.token = data.get('token')
-            self.session.headers.update({'Authorization': f'Bearer {self.token}'})
-            
-            print(f"✅ 登入成功 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            return True
-            
+            if 'bddUserData' in data:
+                logger.info(f"✅ 登入成功 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                return True
+            else:
+                logger.error("❌ 登入失敗: 無法取得使用者資料")
+                return False
+                
         except requests.exceptions.RequestException as e:
-            print(f"❌ 登入失敗: {str(e)}")
+            logger.error(f"❌ 登入失敗: {str(e)}")
+            if hasattr(e.response, 'text'):
+                logger.error(f"回應內容: {e.response.text}")
+            return False
+    
+    def punch(self, punch_type):
+        """
+        執行打卡
+        Args:
+            punch_type: 'ClockIn' 或 'ClockOut'
+        """
+        try:
+            # 解析 GPS 座標
+            lat, lon = self.gps_location.split(',')
+            # 嘗試 WKT POINT 格式（經度 緯度）
+            gps_point = f"POINT({lon.strip()} {lat.strip()})"
+            
+            punch_data = {
+                'type': punch_type,
+                'place': 'OtherCity',
+                'gpsLocation': {'text': gps_point},
+                'gpsPlace': self.gps_place
+            }
+            
+            punch_name = "上班" if punch_type == "ClockIn" else "下班"
+            logger.info(f"⏰ 執行{punch_name}打卡...")
+            
+            response = self.session.post(self.PUNCH_URL, json=punch_data)
+            response.raise_for_status()
+            
+            data = response.json()
+            if 'punchTime' in data:
+                punch_time = data['punchTime'].replace('+0800', '')
+                logger.info(f"✅ {punch_name}打卡成功 - {punch_time}")
+                return True
+            else:
+                logger.warning(f"⚠️ {punch_name}打卡可能失敗，請檢查回應")
+                return False
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ {punch_name}打卡失敗: {str(e)}")
+            if hasattr(e.response, 'text'):
+                logger.error(f"回應內容: {e.response.text}")
             return False
     
     def clock_in(self):
         """上班打卡"""
-        try:
-            url = f"{self.api_url}/api/v1/attendance/clock-in"
-            payload = {
-                'timestamp': datetime.now().isoformat(),
-                'type': 'clock_in'
-            }
-            response = self.session.post(url, json=payload)
-            response.raise_for_status()
-            
-            print(f"✅ 上班打卡成功 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            return True
-            
-        except requests.exceptions.RequestException as e:
-            print(f"❌ 上班打卡失敗: {str(e)}")
-            return False
+        return self.punch('ClockIn')
     
     def clock_out(self):
         """下班打卡"""
-        try:
-            url = f"{self.api_url}/api/v1/attendance/clock-out"
-            payload = {
-                'timestamp': datetime.now().isoformat(),
-                'type': 'clock_out'
-            }
-            response = self.session.post(url, json=payload)
-            response.raise_for_status()
-            
-            print(f"✅ 下班打卡成功 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            return True
-            
-        except requests.exceptions.RequestException as e:
-            print(f"❌ 下班打卡失敗: {str(e)}")
-            return False
+        return self.punch('ClockOut')
     
-    def get_attendance_status(self):
+    def get_punch_status(self):
         """查詢今日打卡狀態"""
         try:
-            url = f"{self.api_url}/api/v1/attendance/status"
-            response = self.session.get(url)
+            logger.info("📊 查詢打卡狀態...")
+            
+            # 空的 POST body
+            response = self.session.post(self.STATUS_URL, json={})
             response.raise_for_status()
             
             data = response.json()
-            print(f"📊 今日打卡狀態: {data}")
-            return data
-            
+            if 'list' in data and len(data['list']) > 0:
+                logger.info("📋 今日打卡記錄:")
+                for i, record in enumerate(data['list'][:2]):  # 顯示前兩筆（上下班）
+                    record_type = "上班" if record.get('type') == 'ClockIn' else "下班"
+                    punch_time = record.get('punchTime', '未打卡')
+                    if punch_time and punch_time != '未打卡':
+                        punch_time = punch_time.replace('+0800', '')
+                    logger.info(f"   {record_type}: {punch_time}")
+                return data
+            else:
+                logger.info("📋 今日尚無打卡記錄")
+                return None
+                
         except requests.exceptions.RequestException as e:
-            print(f"❌ 查詢狀態失敗: {str(e)}")
+            logger.error(f"❌ 查詢狀態失敗: {str(e)}")
             return None
-
-
-class AutoClockScheduler:
-    """自動打卡排程器"""
     
-    def __init__(self, workdo_api, clock_in_time="09:00", clock_out_time="18:00"):
-        self.workdo = workdo_api
-        self.clock_in_time = clock_in_time
-        self.clock_out_time = clock_out_time
-        
-    def job_clock_in(self):
-        """上班打卡任務"""
-        print(f"\n🔔 執行上班打卡任務...")
-        if not self.workdo.token:
-            self.workdo.login()
-        self.workdo.clock_in()
-    
-    def job_clock_out(self):
-        """下班打卡任務"""
-        print(f"\n🔔 執行下班打卡任務...")
-        if not self.workdo.token:
-            self.workdo.login()
-        self.workdo.clock_out()
-    
-    def setup_schedule(self):
-        """設定排程"""
-        schedule.clear()
-        schedule.every().day.at(self.clock_in_time).do(self.job_clock_in)
-        schedule.every().day.at(self.clock_out_time).do(self.job_clock_out)
-        
-        print(f"⏰ 排程設定完成:")
-        print(f"   - 上班打卡時間: {self.clock_in_time}")
-        print(f"   - 下班打卡時間: {self.clock_out_time}")
-    
-    def run(self):
-        """啟動排程器"""
-        self.setup_schedule()
-        
-        print(f"\n🚀 自動打卡排程器已啟動")
-        print(f"   當前時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"\n💡 提示: 按 Ctrl+C 停止執行\n")
+    def query_holidays(self):
+        """查詢假日列表（如果有使用請假 API）"""
+        if not self.use_leave_api:
+            return []
         
         try:
-            while True:
-                schedule.run_pending()
-                time.sleep(60)  # 每分鐘檢查一次
-                    
-        except KeyboardInterrupt:
-            print(f"\n⏹️ 排程器已停止")
-            schedule.clear()
+            logger.info("🗓️ 查詢假日列表...")
+            
+            # 查詢今年度假日
+            current_year = datetime.now().year
+            query_data = {
+                'year': current_year
+            }
+            
+            response = self.session.post(self.HOLIDAY_URL, json=query_data)
+            response.raise_for_status()
+            
+            data = response.json()
+            holidays = []
+            
+            # 解析假日資料（依實際 API 回應格式調整）
+            if 'list' in data:
+                for holiday in data['list']:
+                    if 'date' in holiday:
+                        holidays.append(holiday['date'])
+            
+            logger.info(f"✅ 找到 {len(holidays)} 個假日")
+            return holidays
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 查詢假日失敗: {str(e)}")
+            return []
+    
+    def query_missing_punch(self):
+        """查詢缺卡記錄"""
+        try:
+            logger.info("🔍 查詢缺卡記錄...")
+            
+            response = self.session.post(
+                self.MISSING_PUNCH_QUERY_URL,
+                json={'displayName': 'ClockPunchReq'}
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            missing_records = []
+            
+            if 'list' in data:
+                for record in data['list']:
+                    if record.get('result') == 'Missing':
+                        missing_records.append(record)
+            
+            if missing_records:
+                logger.info(f"⚠️ 發現 {len(missing_records)} 筆缺卡記錄")
+                return missing_records
+            else:
+                logger.info("✅ 無缺卡記錄")
+                return []
+                
+        except Exception as e:
+            logger.warning(f"⚠️ 查詢缺卡記錄失敗: {str(e)}")
+            return []
+    
+    def supplement_missing_punch(self, record):
+        """補打卡"""
+        try:
+            punch_type = record.get('type', 'ClockIn')
+            punch_day = record.get('punchDay')
+            punch_name = "上班" if punch_type == "ClockIn" else "下班"
+            
+            logger.info(f"📝 補{punch_name}打卡 - {punch_day}")
+            
+            # 解析 GPS 座標為 WKT POINT 格式
+            lat, lon = self.gps_location.split(',')
+            gps_point = f"POINT({lon.strip()} {lat.strip()})"
+            
+            # 建立補打卡請求
+            supplement_data = {
+                'reqOid': record.get('reqOid'),
+                'punchDay': punch_day,
+                'reqPunchTime': record.get('reqPunchTime'),
+                'reqPlace': 'OtherCity',
+                'reqOidEnc': record.get('reqOidEnc'),
+                'type': punch_type,
+                'fileInfoList': record.get('fileInfoList', []),
+                'reqWifiPoint': record.get('reqWifiPoint'),
+                'reqWifiMac': record.get('reqWifiMac'),
+                'reqGpsPlace': self.gps_place,
+                'reqGpsLocation': {'text': gps_point},
+                'reqFaceDeviceName': record.get('reqFaceDeviceName'),
+                'reqFaceDeviceOid': record.get('reqFaceDeviceOid')
+            }
+            
+            response = self.session.post(self.MISSING_PUNCH_SAVE_URL, json=supplement_data)
+            response.raise_for_status()
+            
+            logger.info(f"✅ 補打卡成功 - {punch_day}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 補打卡失敗: {str(e)}")
+            return False
+    
+    def is_holiday(self):
+        """檢查今天是否為假日"""
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # 檢查週末
+        if datetime.now().weekday() >= 5:  # 5=週六, 6=週日
+            logger.info("📅 今天是週末")
+            return True
+        
+        # 檢查請假日設定（從 JSON 檔案）
+        if os.path.exists('leave_days.json'):
+            try:
+                with open('leave_days.json', 'r', encoding='utf-8') as f:
+                    leave_days = json.load(f)
+                    if today in leave_days:
+                        logger.info(f"📅 今天是請假日: {leave_days[today]}")
+                        return True
+            except Exception as e:
+                logger.warning(f"⚠️ 讀取請假日設定失敗: {str(e)}")
+        
+        # 使用 API 查詢假日
+        holidays = self.query_holidays()
+        if today in holidays:
+            logger.info("📅 今天是假日")
+            return True
+        
+        return False
 
 
 def main():
@@ -156,52 +308,83 @@ def main():
     load_dotenv()
     
     # 解析命令列參數
-    parser = argparse.ArgumentParser(description='Workdo API 自動打卡程式')
-    parser.add_argument('action', choices=['in', 'out', 'status', 'auto'], 
-                        help='執行動作: in(上班打卡), out(下班打卡), status(查詢狀態), auto(自動排程)')
-    parser.add_argument('--clock-in', default='09:00', 
-                        help='上班打卡時間 (預設: 09:00)')
-    parser.add_argument('--clock-out', default='18:00', 
-                        help='下班打卡時間 (預設: 18:00)')
+    parser = argparse.ArgumentParser(description='Workdo 自動打卡系統')
+    parser.add_argument(
+        'action',
+        choices=['in', 'out', 'status', 'check-missing', 'auto'],
+        help='執行動作: in(上班打卡), out(下班打卡), status(查詢狀態), check-missing(檢查並補缺卡), auto(智慧判斷)'
+    )
     
     args = parser.parse_args()
     
     # 檢查環境變數
-    required_vars = ['WORKDO_EMAIL', 'WORKDO_PASSWORD', 'WORKDO_COMPANY_ID']
+    required_vars = ['WORKDO_EMAIL', 'WORKDO_PASSWORD']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     
     if missing_vars:
-        print(f"❌ 錯誤: 缺少環境變數: {', '.join(missing_vars)}")
-        print("請建立 .env 檔案並設定必要的環境變數")
+        logger.error(f"❌ 錯誤: 缺少環境變數: {', '.join(missing_vars)}")
+        logger.error("請建立 .env 檔案並設定必要的環境變數")
         sys.exit(1)
     
     # 建立 API 實例
     workdo = WorkdoAPI()
     
+    # 登入
+    if not workdo.login():
+        logger.error("❌ 登入失敗，程式結束")
+        sys.exit(1)
+    
+    # 檢查是否為假日（自動打卡模式時跳過假日）
+    if args.action in ['in', 'out', 'auto']:
+        if workdo.is_holiday():
+            logger.info("🎉 今天是假日，不需要打卡")
+            sys.exit(0)
+    
     # 執行對應動作
     if args.action == 'in':
-        # 手動上班打卡
-        if workdo.login():
-            workdo.clock_in()
-    
+        # 上班打卡
+        workdo.clock_in()
+        workdo.get_punch_status()
+        
     elif args.action == 'out':
-        # 手動下班打卡
-        if workdo.login():
-            workdo.clock_out()
-    
+        # 下班打卡
+        workdo.clock_out()
+        workdo.get_punch_status()
+        
     elif args.action == 'status':
-        # 查詢打卡狀態
-        if workdo.login():
-            workdo.get_attendance_status()
+        # 查詢狀態
+        workdo.get_punch_status()
+        
+    elif args.action == 'check-missing':
+        # 檢查並補缺卡
+        missing_records = workdo.query_missing_punch()
+        for record in missing_records:
+            workdo.supplement_missing_punch(record)
     
     elif args.action == 'auto':
-        # 自動排程打卡
-        scheduler = AutoClockScheduler(
-            workdo_api=workdo,
-            clock_in_time=args.clock_in,
-            clock_out_time=args.clock_out
-        )
-        scheduler.run()
+        # 智慧判斷：根據時間自動打卡
+        current_hour = datetime.now().hour
+        
+        # 先檢查並補缺卡
+        missing_records = workdo.query_missing_punch()
+        if missing_records:
+            logger.info("🔧 先處理缺卡記錄...")
+            for record in missing_records:
+                workdo.supplement_missing_punch(record)
+        
+        # 根據時間判斷上下班
+        if 6 <= current_hour < 12:
+            logger.info("🌅 早上時段，執行上班打卡")
+            workdo.clock_in()
+        elif 17 <= current_hour < 23:
+            logger.info("🌆 傍晚時段，執行下班打卡")
+            workdo.clock_out()
+        else:
+            logger.info(f"⏰ 目前時間 {current_hour}:00 不在打卡時段內")
+        
+        workdo.get_punch_status()
+    
+    logger.info("✨ 執行完成")
 
 
 if __name__ == '__main__':
