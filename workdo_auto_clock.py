@@ -249,15 +249,22 @@ class WorkdoAPI:
                         logger.info(f"   📅 {date_str}: {name}")
             
             if not new_holidays:
-                logger.warning("⚠️ 未找到任何假日資料，可能需要檢查 API 回應格式")
+                logger.warning("⚠️ API 未返回任何假日資料")
                 logger.info(f"💡 完整 API 回應: {json.dumps(data, ensure_ascii=False, indent=2)}")
-                return False
-            
-            # 合併現有資料和新查詢的假日（新查詢的假日會覆蓋舊的）
-            merged_leave_days = {**existing_leave_days, **new_holidays}
-            
-            # 按日期排序
-            sorted_leave_days = dict(sorted(merged_leave_days.items()))
+                
+                # 即使 API 沒有返回新資料，如果有現有資料也要保存
+                if existing_leave_days:
+                    logger.info(f"📝 將保留現有的 {len(existing_leave_days)} 筆假日資料")
+                    sorted_leave_days = dict(sorted(existing_leave_days.items()))
+                else:
+                    logger.warning("⚠️ 無現有資料，將建立空的假日檔案")
+                    sorted_leave_days = {}
+            else:
+                # 合併現有資料和新查詢的假日（新查詢的假日會覆蓋舊的）
+                merged_leave_days = {**existing_leave_days, **new_holidays}
+                
+                # 按日期排序
+                sorted_leave_days = dict(sorted(merged_leave_days.items()))
             
             logger.info(f"💾 準備寫入 leave_days.json...")
             
@@ -276,15 +283,15 @@ class WorkdoAPI:
                 return False
             
             file_size = os.path.getsize('leave_days.json')
-            if file_size == 0:
-                logger.error(f"❌ 驗證失敗: leave_days.json 為空")
-                return False
-            
             logger.info(f"✅ 檔案驗證通過 (大小: {file_size} bytes)")
             logger.info(f"📊 統計資訊:")
             logger.info(f"   • 總計: {len(sorted_leave_days)} 筆假日資料")
             logger.info(f"   • 從 API 新增/更新: {len(new_holidays)} 筆")
             logger.info(f"   • 保留現有設定: {len(existing_leave_days)} 筆")
+            
+            # 即使沒有新資料，只要成功建立檔案就算成功
+            if len(sorted_leave_days) == 0:
+                logger.warning("⚠️ 檔案中沒有任何假日資料，但檔案已成功建立")
             
             return True
             
