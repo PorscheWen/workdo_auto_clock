@@ -203,6 +203,74 @@ class WorkdoAPI:
             logger.warning(f"⚠️ 查詢假日失敗: {str(e)}")
             return []
     
+    def update_leave_days_from_api(self):
+        """從 Workdo API 查詢假日並更新 leave_days.json"""
+        try:
+            logger.info("🔄 開始從 Workdo API 更新假日資料...")
+            
+            # 讀取現有的 leave_days.json（如果存在）
+            existing_leave_days = {}
+            if os.path.exists('leave_days.json'):
+                try:
+                    with open('leave_days.json', 'r', encoding='utf-8') as f:
+                        existing_leave_days = json.load(f)
+                    logger.info(f"📖 讀取現有請假日設定: {len(existing_leave_days)} 筆")
+                except Exception as e:
+                    logger.warning(f"⚠️ 讀取現有設定失敗: {str(e)}")
+            
+            # 查詢今年度假日
+            current_year = datetime.now().year
+            query_data = {
+                'year': current_year
+            }
+            
+            logger.info(f"🗓️ 查詢 {current_year} 年度假日...")
+            response = self.session.post(self.HOLIDAY_URL, json=query_data)
+            response.raise_for_status()
+            
+            data = response.json()
+            new_holidays = {}
+            
+            # 解析假日資料
+            if 'list' in data:
+                for holiday in data['list']:
+                    if 'date' in holiday and 'name' in holiday:
+                        date_str = holiday['date']
+                        name = holiday.get('name', '假日')
+                        new_holidays[date_str] = name
+                        logger.info(f"   📅 {date_str}: {name}")
+            
+            if not new_holidays:
+                logger.warning("⚠️ 未找到任何假日資料，可能需要檢查 API 回應格式")
+                logger.info(f"API 回應: {data}")
+                return False
+            
+            # 合併現有資料和新查詢的假日（新查詢的假日會覆蓋舊的）
+            merged_leave_days = {**existing_leave_days, **new_holidays}
+            
+            # 按日期排序
+            sorted_leave_days = dict(sorted(merged_leave_days.items()))
+            
+            # 寫入 leave_days.json
+            with open('leave_days.json', 'w', encoding='utf-8') as f:
+                json.dump(sorted_leave_days, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"✅ 成功更新 leave_days.json")
+            logger.info(f"📊 總計: {len(sorted_leave_days)} 筆假日資料")
+            logger.info(f"   • 從 API 新增/更新: {len(new_holidays)} 筆")
+            logger.info(f"   • 保留現有設定: {len(existing_leave_days)} 筆")
+            
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ API 查詢失敗: {str(e)}")
+            if hasattr(e.response, 'text'):
+                logger.error(f"回應內容: {e.response.text}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ 更新假日資料失敗: {str(e)}")
+            return False
+    
     def query_missing_punch(self):
         """查詢缺卡記錄"""
         try:
@@ -311,8 +379,13 @@ def main():
     parser = argparse.ArgumentParser(description='Workdo 自動打卡系統')
     parser.add_argument(
         'action',
-        choices=['in', 'out', 'status', 'check-missing', 'auto'],
-        help='執行動作: in(上班打卡), out(下班打卡), status(查詢狀態), check-missing(檢查並補缺卡), auto(智慧判斷)'
+        choices=['in', 'out', 'status', 'check-missing', 'auto', 'update-holidays'],
+        help='執行動作: in(上班打卡), out(下班打卡), status(查詢狀態), check-missing(檢查並補缺卡), auto(智慧判斷), update-holidays(更新假日資料)'
+    )
+    parser.add_argument(
+        '--skip-holiday-check',
+        action='store_true',
+        help='跳過假日檢查，強制執行打卡'
     )
     
     args = parser.parse_args()
@@ -335,7 +408,7 @@ def main():
         sys.exit(1)
     
     # 檢查是否為假日（自動打卡模式時跳過假日）
-    if args.action in ['in', 'out', 'auto']:
+    if args.action in ['in', 'out', 'auto'] and not args.skip_holiday_check:
         if workdo.is_holiday():
             logger.info("🎉 今天是假日，不需要打卡")
             sys.exit(0)
@@ -360,6 +433,17 @@ def main():
         missing_records = workdo.query_missing_punch()
         for record in missing_records:
             workdo.supplement_missing_punch(record)
+    
+    elif args.action == 'update-holidays':
+        # 從 Workdo API 更新假日資料
+        success = workdo.update_leave_days_from_api()
+        if not success:
+            logger.error("❌ 更新假日資料失敗")
+            logger.info("💡 提示:")
+            logger.info("   1. 確認已設定 WORKDO_USE_LEAVE_API=true")
+            logger.info("   2. 確認帳號有權限存取假日資料")
+            logger.info("   3. 檢查 API 回應格式是否正確")
+            sys.exit(1)
     
     elif args.action == 'auto':
         # 智慧判斷：根據時間自動打卡
