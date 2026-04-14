@@ -136,18 +136,27 @@ python workdo_auto_clock.py update-holidays
 
 ### 2. 排程說明
 
-預設排程（`.github/workflows/auto-clock.yml`）：
-- **上班打卡**: 每週一至週五 09:00（台灣時間）
+#### 自動打卡排程（`.github/workflows/auto-clock.yml`）
+- **上班打卡**: 每週一至週五 08:30（台灣時間）
 - **下班打卡**: 每週一至週五 18:00（台灣時間）
+
+#### 自動更新假日資料（`.github/workflows/update-holidays.yml`）✨ **新增**
+- **執行時間**: 每週一 08:00（台灣時間）
+- **功能**: 自動從 Workdo API 查詢並更新公司假日
+- **條件**: 需設定 `WORKDO_USE_LEAVE_API=true`
+- **結果**: 更新後的假日資料會儲存為 Artifact，可下載查看
 
 ### 3. 測試設定
 
 **手動觸發測試**：
 1. 進入 Actions 分頁
-2. 選擇 "Workdo 自動打卡"
+2. 選擇工作流程：
+   - **"Workdo 自動打卡"** - 測試打卡功能
+   - **"更新假日資料"** - 測試假日更新功能
 3. 點擊 Run workflow
-4. 選擇執行動作：
+4. 選擇執行動作（打卡工作流程）：
    - `status` - **推薦先執行此項**，查詢打卡狀態驗證設定
+   - `update-holidays` - 更新假日資料
    - `in` - 測試上班打卡
    - `out` - 測試下班打卡
    - `check-missing` - 檢查並補缺卡
