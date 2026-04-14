@@ -184,7 +184,8 @@ class WorkdoAPI:
                 'year': current_year
             }
             
-            response = self.session.post(self.HOLIDAY_URL, json=query_data)
+            # 使用 GET 方法，將參數作為 query parameters
+            response = self.session.get(self.HOLIDAY_URL, params=query_data)
             response.raise_for_status()
             
             data = response.json()
@@ -228,7 +229,8 @@ class WorkdoAPI:
             logger.info(f"📍 API URL: {self.HOLIDAY_URL}")
             logger.info(f"📤 請求資料: {query_data}")
             
-            response = self.session.post(self.HOLIDAY_URL, json=query_data)
+            # 使用 GET 方法，將參數作為 query parameters
+            response = self.session.get(self.HOLIDAY_URL, params=query_data)
             logger.info(f"📥 HTTP 狀態碼: {response.status_code}")
             response.raise_for_status()
             
