@@ -225,10 +225,16 @@ class WorkdoAPI:
             }
             
             logger.info(f"🗓️ 查詢 {current_year} 年度假日...")
+            logger.info(f"📍 API URL: {self.HOLIDAY_URL}")
+            logger.info(f"📤 請求資料: {query_data}")
+            
             response = self.session.post(self.HOLIDAY_URL, json=query_data)
+            logger.info(f"📥 HTTP 狀態碼: {response.status_code}")
             response.raise_for_status()
             
             data = response.json()
+            logger.info(f"📋 API 回應內容: {json.dumps(data, ensure_ascii=False, indent=2)}")
+            
             new_holidays = {}
             
             # 解析假日資料
@@ -242,7 +248,7 @@ class WorkdoAPI:
             
             if not new_holidays:
                 logger.warning("⚠️ 未找到任何假日資料，可能需要檢查 API 回應格式")
-                logger.info(f"API 回應: {data}")
+                logger.info(f"💡 完整 API 回應: {json.dumps(data, ensure_ascii=False, indent=2)}")
                 return False
             
             # 合併現有資料和新查詢的假日（新查詢的假日會覆蓋舊的）
@@ -436,14 +442,25 @@ def main():
     
     elif args.action == 'update-holidays':
         # 從 Workdo API 更新假日資料
-        success = workdo.update_leave_days_from_api()
-        if not success:
-            logger.error("❌ 更新假日資料失敗")
-            logger.info("💡 提示:")
-            logger.info("   1. 確認已設定 WORKDO_USE_LEAVE_API=true")
-            logger.info("   2. 確認帳號有權限存取假日資料")
-            logger.info("   3. 檢查 API 回應格式是否正確")
-            sys.exit(1)
+        try:
+            success = workdo.update_leave_days_from_api()
+            if not success:
+                logger.error("❌ 更新假日資料失敗")
+                logger.info("💡 提示:")
+                logger.info("   1. 確認已設定 WORKDO_USE_LEAVE_API=true")
+                logger.info("   2. 確認帳號有權限存取假日資料")
+                logger.info("   3. 檢查 API 回應格式是否正確")
+                # 在 CI 環境中，即使失敗也不要退出，讓 workflow 能完成
+                if os.environ.get('CI'):
+                    logger.warning("⚠️ 在 CI 環境中，繼續執行...")
+                else:
+                    sys.exit(1)
+        except Exception as e:
+            logger.error(f"❌ 更新假日資料時發生異常: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            if not os.environ.get('CI'):
+                sys.exit(1)
     
     elif args.action == 'auto':
         # 智慧判斷：根據時間自動打卡

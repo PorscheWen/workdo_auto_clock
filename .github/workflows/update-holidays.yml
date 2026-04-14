@@ -25,17 +25,37 @@ jobs:
     
     steps:
       - name: 檢出程式碼
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: 設定 Python 環境
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.11'
           cache: 'pip'
       
       - name: 安裝依賴套件
         run: |
           pip install -r requirements.txt
+      
+      - name: 驗證環境變數
+        run: |
+          echo "🔍 檢查必要的環境變數..."
+          if [ -z "$WORKDO_EMAIL" ]; then
+            echo "❌ WORKDO_EMAIL 未設定"
+            exit 1
+          else
+            echo "✅ WORKDO_EMAIL 已設定"
+          fi
+          if [ -z "$WORKDO_PASSWORD" ]; then
+            echo "❌ WORKDO_PASSWORD 未設定"
+            exit 1
+          else
+            echo "✅ WORKDO_PASSWORD 已設定"
+          fi
+          echo "📊 其他環境變數狀態:"
+          echo "   WORKDO_USE_LEAVE_API: ${WORKDO_USE_LEAVE_API:-未設定}"
+          echo "   WORKDO_GPS_LOCATION: ${WORKDO_GPS_LOCATION:+已設定}"
+          echo "   WORKDO_GPS_PLACE: ${WORKDO_GPS_PLACE:+已設定}"
       
       - name: 建立現有請假日設定檔
         if: env.LEAVE_DAYS_JSON != ''
@@ -59,7 +79,7 @@ jobs:
       
       - name: 上傳更新後的假日資料
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: leave-days-${{ github.run_number }}
           path: leave_days.json
@@ -67,7 +87,7 @@ jobs:
       
       - name: 上傳日誌
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: update-holidays-log-${{ github.run_number }}
           path: |
