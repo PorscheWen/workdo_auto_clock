@@ -363,7 +363,10 @@ def main():
     
     elif args.action == 'auto':
         # 智慧判斷：根據時間自動打卡
-        current_hour = datetime.now().hour
+        now = datetime.now()
+        current_hour = now.hour
+        current_minute = now.minute
+        current_time = current_hour * 100 + current_minute  # 例如 8:30 = 830, 18:00 = 1800
         
         # 先檢查並補缺卡
         missing_records = workdo.query_missing_punch()
@@ -373,14 +376,16 @@ def main():
                 workdo.supplement_missing_punch(record)
         
         # 根據時間判斷上下班
-        if 6 <= current_hour < 12:
-            logger.info("🌅 早上時段，執行上班打卡")
+        # 上班打卡：8:30-9:00
+        if 830 <= current_time < 900:
+            logger.info(f"🌅 早上時段 ({current_hour:02d}:{current_minute:02d})，執行上班打卡")
             workdo.clock_in()
-        elif 17 <= current_hour < 23:
-            logger.info("🌆 傍晚時段，執行下班打卡")
+        # 下班打卡：18:00-18:30
+        elif 1800 <= current_time < 1830:
+            logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
             workdo.clock_out()
         else:
-            logger.info(f"⏰ 目前時間 {current_hour}:00 不在打卡時段內")
+            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:30-9:00, 下班: 18:00-18:30）")
         
         workdo.get_punch_status()
     

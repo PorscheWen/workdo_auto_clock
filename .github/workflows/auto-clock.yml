@@ -3,8 +3,8 @@ name: Workdo 自動打卡
 on:
   # 定時執行（使用 UTC 時間）
   schedule:
-    # 上班打卡：每週一至週五 UTC 01:00 (台灣時間 09:00)
-    - cron: '0 1 * * 1-5'
+    # 上班打卡：每週一至週五 UTC 00:30 (台灣時間 08:30)
+    - cron: '30 0 * * 1-5'
     # 下班打卡：每週一至週五 UTC 10:00 (台灣時間 18:00)
     - cron: '0 10 * * 1-5'
   
@@ -61,7 +61,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 1 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "30 0 * * 1-5" ]; then
             echo "action=in" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.schedule }}" = "0 10 * * 1-5" ]; then
             echo "action=out" >> $GITHUB_OUTPUT
