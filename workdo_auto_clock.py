@@ -37,6 +37,9 @@ class WorkdoAPI:
     MISSING_PUNCH_QUERY_URL = f"{BASE_URL}/ccnraweb/api/aweb/CCN002W/queryFromQuery002W1"
     MISSING_PUNCH_SAVE_URL = f"{BASE_URL}/ccndweb/api/dweb/CCN102M/saveFromCreate102M4"
     
+    # 台湾政府公开假日数据源（备用）
+    TAIWAN_CALENDAR_URL = "https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data/{year}.json"
+    
     def __init__(self):
         self.email = os.getenv('WORKDO_EMAIL')
         self.password = os.getenv('WORKDO_PASSWORD')
@@ -319,6 +322,109 @@ class WorkdoAPI:
         
         return True
     
+    def update_holidays_from_taiwan_calendar(self):
+        """從台湾公开日历数据源更新假日資料"""
+        
+        # 讀取現有的 leave_days.json（如果存在）
+        existing_leave_days = {}
+        if os.path.exists('leave_days.json'):
+            try:
+                with open('leave_days.json', 'r', encoding='utf-8') as f:
+                    existing_leave_days = json.load(f)
+                logger.info(f"📖 讀取現有請假日設定: {len(existing_leave_days)} 筆")
+            except Exception as e:
+                logger.warning(f"⚠️ 讀取現有設定失敗: {str(e)}")
+        
+        new_holidays = {}
+        api_success = False
+        
+        try:
+            logger.info("🔄 從台灣公開日曆數據源更新假日資料...")
+            
+            # 查詢今年度假日
+            current_year = datetime.now().year
+            calendar_url = self.TAIWAN_CALENDAR_URL.format(year=current_year)
+            
+            logger.info(f"🗓️ 查詢 {current_year} 年度台灣假日...")
+            logger.info(f"📍 API URL: {calendar_url}")
+            
+            response = requests.get(calendar_url, timeout=10)
+            logger.info(f"📥 HTTP 狀態碼: {response.status_code}")
+            
+            if response.status_code >= 400:
+                logger.error(f"❌ API 返回錯誤狀態碼: {response.status_code}")
+            else:
+                response.raise_for_status()
+                
+                data = response.json()
+                logger.info(f"📋 成功獲取日曆資料，共 {len(data)} 天")
+                
+                # 解析假日資料（只取有描述的假日）
+                for day in data:
+                    if day.get('isHoliday') and day.get('description'):
+                        date_str = day['date']  # 格式: 20260101
+                        # 轉換為 YYYY-MM-DD 格式
+                        formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                        name = day['description']
+                        new_holidays[formatted_date] = name
+                        logger.info(f"   📅 {formatted_date}: {name}")
+                
+                api_success = True
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ API 請求失敗: {str(e)}")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON 解析失敗: {str(e)}")
+        except Exception as e:
+            logger.error(f"❌ 查詢假日資料時發生未預期的錯誤: {str(e)}")
+            import traceback
+            logger.error(f"錯誤堆疊: {traceback.format_exc()}")
+        
+        # 無論 API 是否成功，都要生成文件
+        logger.info("=" * 60)
+        logger.info("📝 準備生成 leave_days.json 文件...")
+        
+        if not new_holidays and not existing_leave_days:
+            logger.warning("⚠️ 無任何假日資料（無 API 資料也無現有資料），將建立空的 JSON 文件")
+            sorted_leave_days = {}
+        elif not new_holidays:
+            logger.info(f"📝 API 無新資料，保留現有的 {len(existing_leave_days)} 筆假日資料")
+            sorted_leave_days = dict(sorted(existing_leave_days.items()))
+        else:
+            # 合併現有資料和新查詢的假日（新查詢的假日會覆蓋舊的）
+            merged_leave_days = {**existing_leave_days, **new_holidays}
+            sorted_leave_days = dict(sorted(merged_leave_days.items()))
+        
+        logger.info(f"💾 準備寫入 leave_days.json...")
+        
+        # 寫入 leave_days.json（無論有無資料都寫入）
+        try:
+            with open('leave_days.json', 'w', encoding='utf-8') as f:
+                json.dump(sorted_leave_days, f, ensure_ascii=False, indent=2)
+            logger.info(f"✅ 成功寫入 leave_days.json")
+        except Exception as e:
+            logger.error(f"❌ 寫入檔案失敗: {str(e)}")
+            import traceback
+            logger.error(f"錯誤堆疊: {traceback.format_exc()}")
+            return False
+        
+        # 驗證文件是否正確寫入
+        if not os.path.exists('leave_days.json'):
+            logger.error(f"❌ 驗證失敗: leave_days.json 不存在")
+            return False
+        
+        file_size = os.path.getsize('leave_days.json')
+        logger.info(f"✅ 檔案驗證通過 (大小: {file_size} bytes)")
+        logger.info(f"📊 統計資訊:")
+        logger.info(f"   • 總計: {len(sorted_leave_days)} 筆假日資料")
+        logger.info(f"   • 從 API 新增/更新: {len(new_holidays)} 筆")
+        logger.info(f"   • 保留現有設定: {len(existing_leave_days)} 筆")
+        
+        if len(sorted_leave_days) == 0:
+            logger.warning("⚠️ 檔案中沒有任何假日資料，但檔案已成功建立")
+        
+        return True
+    
     def query_missing_punch(self):
         """查詢缺卡記錄"""
         try:
@@ -427,8 +533,8 @@ def main():
     parser = argparse.ArgumentParser(description='Workdo 自動打卡系統')
     parser.add_argument(
         'action',
-        choices=['in', 'out', 'status', 'check-missing', 'auto', 'update-holidays'],
-        help='執行動作: in(上班打卡), out(下班打卡), status(查詢狀態), check-missing(檢查並補缺卡), auto(智慧判斷), update-holidays(更新假日資料)'
+        choices=['in', 'out', 'status', 'check-missing', 'auto', 'update-holidays', 'update-holidays-tw'],
+        help='執行動作: in(上班打卡), out(下班打卡), status(查詢狀態), check-missing(檢查並補缺卡), auto(智慧判斷), update-holidays(從Workdo更新假日), update-holidays-tw(從台灣政府公開資料更新假日)'
     )
     parser.add_argument(
         '--skip-holiday-check',
@@ -438,6 +544,61 @@ def main():
     
     args = parser.parse_args()
     
+    # update-holidays-tw 不需要 Workdo 登入，可以跳過環境變數檢查
+    if args.action == 'update-holidays-tw':
+        # 直接執行台灣假日更新，不需要建立 WorkdoAPI 實例
+        try:
+            logger.info("=" * 60)
+            logger.info("🚀 開始從台灣公開日曆數據源更新假日資料")
+            logger.info("=" * 60)
+            
+            # 創建一個臨時實例只用於調用該方法
+            temp_api = WorkdoAPI.__new__(WorkdoAPI)
+            success = temp_api.update_holidays_from_taiwan_calendar()
+            
+            logger.info("=" * 60)
+            if success:
+                logger.info("✅ 假日資料更新任務完成")
+                # 驗證文件是否存在
+                if os.path.exists('leave_days.json'):
+                    file_size = os.path.getsize('leave_days.json')
+                    logger.info(f"✅ leave_days.json 已生成 (大小: {file_size} bytes)")
+                    
+                    # 顯示部分內容
+                    try:
+                        with open('leave_days.json', 'r', encoding='utf-8') as f:
+                            holidays = json.load(f)
+                        logger.info(f"📅 已載入 {len(holidays)} 個假日")
+                        if holidays:
+                            logger.info("前 5 個假日:")
+                            for i, (date, name) in enumerate(list(holidays.items())[:5]):
+                                logger.info(f"   {date}: {name}")
+                    except Exception as e:
+                        logger.warning(f"無法讀取文件內容: {str(e)}")
+                else:
+                    logger.error("❌ leave_days.json 未生成")
+                    success = False
+            else:
+                logger.error("❌ 假日資料更新任務失敗")
+                logger.info("💡 提示:")
+                logger.info("   1. 檢查網路連線是否正常")
+                logger.info("   2. 確認台灣日曆數據源是否可存取")
+            logger.info("=" * 60)
+            
+            if not success:
+                sys.exit(1)
+            else:
+                logger.info("✨ 執行完成")
+                sys.exit(0)
+                
+        except Exception as e:
+            logger.error(f"❌ 更新假日資料時發生異常: {str(e)}")
+            import traceback
+            logger.error("完整錯誤堆疊:")
+            logger.error(traceback.format_exc())
+            sys.exit(1)
+    
+    # 其他操作需要檢查環境變數
     # 檢查環境變數
     required_vars = ['WORKDO_EMAIL', 'WORKDO_PASSWORD']
     missing_vars = [var for var in required_vars if not os.getenv(var)]

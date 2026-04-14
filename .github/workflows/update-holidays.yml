@@ -63,9 +63,9 @@ jobs:
           echo '${{ secrets.LEAVE_DAYS_JSON }}' > leave_days.json
           echo "📝 已載入現有請假日設定"
       
-      - name: 從 Workdo API 更新假日資料
+      - name: 從台灣政府公開資料更新假日
         run: |
-          python workdo_auto_clock.py update-holidays 2>&1 | tee update-holidays.log
+          python workdo_auto_clock.py update-holidays-tw 2>&1 | tee update-holidays.log
           echo "📊 執行結果: 退出碼 = $?"
       
       - name: 檢查生成的文件
