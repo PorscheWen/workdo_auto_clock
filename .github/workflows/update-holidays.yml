@@ -6,6 +6,7 @@ on:
     # 每週一 UTC 00:00 (台灣時間 08:00)
     - cron: '0 0 * * 1'
   
+  
   # 允許手動觸發
   workflow_dispatch:
 
@@ -73,3 +74,4 @@ jobs:
           path: |
             *.log
           retention-days: 7
+
