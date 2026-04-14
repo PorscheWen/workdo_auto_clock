@@ -259,24 +259,48 @@ class WorkdoAPI:
             # 按日期排序
             sorted_leave_days = dict(sorted(merged_leave_days.items()))
             
-            # 寫入 leave_days.json
-            with open('leave_days.json', 'w', encoding='utf-8') as f:
-                json.dump(sorted_leave_days, f, ensure_ascii=False, indent=2)
+            logger.info(f"💾 準備寫入 leave_days.json...")
             
-            logger.info(f"✅ 成功更新 leave_days.json")
-            logger.info(f"📊 總計: {len(sorted_leave_days)} 筆假日資料")
+            # 寫入 leave_days.json
+            try:
+                with open('leave_days.json', 'w', encoding='utf-8') as f:
+                    json.dump(sorted_leave_days, f, ensure_ascii=False, indent=2)
+                logger.info(f"✅ 成功寫入 leave_days.json")
+            except Exception as e:
+                logger.error(f"❌ 寫入檔案失敗: {str(e)}")
+                return False
+            
+            # 驗證文件是否正確寫入
+            if not os.path.exists('leave_days.json'):
+                logger.error(f"❌ 驗證失敗: leave_days.json 不存在")
+                return False
+            
+            file_size = os.path.getsize('leave_days.json')
+            if file_size == 0:
+                logger.error(f"❌ 驗證失敗: leave_days.json 為空")
+                return False
+            
+            logger.info(f"✅ 檔案驗證通過 (大小: {file_size} bytes)")
+            logger.info(f"📊 統計資訊:")
+            logger.info(f"   • 總計: {len(sorted_leave_days)} 筆假日資料")
             logger.info(f"   • 從 API 新增/更新: {len(new_holidays)} 筆")
             logger.info(f"   • 保留現有設定: {len(existing_leave_days)} 筆")
             
             return True
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"❌ API 查詢失敗: {str(e)}")
-            if hasattr(e.response, 'text'):
-                logger.error(f"回應內容: {e.response.text}")
+            logger.error(f"❌ API 請求失敗: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"📥 HTTP 狀態碼: {e.response.status_code}")
+                logger.error(f"📋 回應內容: {e.response.text[:500]}")  # 只顯示前 500 字元
+            return False
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON 解析失敗: {str(e)}")
             return False
         except Exception as e:
-            logger.error(f"❌ 更新假日資料失敗: {str(e)}")
+            logger.error(f"❌ 更新假日資料時發生未預期的錯誤: {str(e)}")
+            import traceback
+            logger.error(f"錯誤堆疊: {traceback.format_exc()}")
             return False
     
     def query_missing_punch(self):
@@ -445,21 +469,38 @@ def main():
     elif args.action == 'update-holidays':
         # 從 Workdo API 更新假日資料
         try:
+            logger.info("=" * 60)
+            logger.info("🚀 開始執行假日資料更新任務")
+            logger.info("=" * 60)
+            
             success = workdo.update_leave_days_from_api()
-            if not success:
-                logger.error("❌ 更新假日資料失敗")
+            
+            logger.info("=" * 60)
+            if success:
+                logger.info("✅ 假日資料更新任務完成")
+                # 驗證文件是否存在
+                if os.path.exists('leave_days.json'):
+                    file_size = os.path.getsize('leave_days.json')
+                    logger.info(f"✅ leave_days.json 已生成 (大小: {file_size} bytes)")
+                else:
+                    logger.error("❌ leave_days.json 未生成")
+                    success = False
+            else:
+                logger.error("❌ 假日資料更新任務失敗")
                 logger.info("💡 提示:")
                 logger.info("   1. 確認已設定 WORKDO_USE_LEAVE_API=true")
                 logger.info("   2. 確認帳號有權限存取假日資料")
                 logger.info("   3. 檢查 API 回應格式是否正確")
-                # 在 CI 環境中，即使失敗也不要退出，讓 workflow 能完成
-                if os.environ.get('CI'):
-                    logger.warning("⚠️ 在 CI 環境中，繼續執行...")
-                else:
-                    sys.exit(1)
+            logger.info("=" * 60)
+            
+            # 在 CI 環境中，即使失敗也不要退出，讓 workflow 能完成
+            if not success and not os.environ.get('CI'):
+                sys.exit(1)
+                
         except Exception as e:
             logger.error(f"❌ 更新假日資料時發生異常: {str(e)}")
             import traceback
+            logger.error("完整錯誤堆疊:")
             logger.error(traceback.format_exc())
             if not os.environ.get('CI'):
                 sys.exit(1)

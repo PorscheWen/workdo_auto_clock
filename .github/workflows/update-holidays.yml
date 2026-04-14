@@ -65,7 +65,28 @@ jobs:
       
       - name: 從 Workdo API 更新假日資料
         run: |
-          python workdo_auto_clock.py update-holidays
+          python workdo_auto_clock.py update-holidays 2>&1 | tee update-holidays.log
+          echo "📊 執行結果: 退出碼 = $?"
+      
+      - name: 檢查生成的文件
+        if: always()
+        run: |
+          echo "📁 當前目錄檔案列表:"
+          ls -lah
+          echo ""
+          if [ -f leave_days.json ]; then
+            echo "✅ leave_days.json 已生成"
+            echo "📄 檔案大小: $(wc -c < leave_days.json) bytes"
+            echo "📋 檔案內容:"
+            cat leave_days.json
+          else
+            echo "❌ leave_days.json 未生成"
+          fi
+          echo ""
+          if [ -f update-holidays.log ]; then
+            echo "📝 完整執行日誌:"
+            cat update-holidays.log
+          fi
       
       - name: 顯示更新後的假日資料
         if: always()
@@ -79,18 +100,22 @@ jobs:
       
       - name: 上傳更新後的假日資料
         if: success()
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: leave-days-${{ github.run_number }}
           path: leave_days.json
           retention-days: 30
+          if-no-files-found: warn
       
       - name: 上傳日誌
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: update-holidays-log-${{ github.run_number }}
           path: |
             *.log
           retention-days: 7
+          if-no-files-found: warn
 
