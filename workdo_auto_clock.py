@@ -206,18 +206,22 @@ class WorkdoAPI:
     
     def update_leave_days_from_api(self):
         """從 Workdo API 查詢假日並更新 leave_days.json"""
+        
+        # 讀取現有的 leave_days.json（如果存在）
+        existing_leave_days = {}
+        if os.path.exists('leave_days.json'):
+            try:
+                with open('leave_days.json', 'r', encoding='utf-8') as f:
+                    existing_leave_days = json.load(f)
+                logger.info(f"📖 讀取現有請假日設定: {len(existing_leave_days)} 筆")
+            except Exception as e:
+                logger.warning(f"⚠️ 讀取現有設定失敗: {str(e)}")
+        
+        new_holidays = {}
+        api_success = False
+        
         try:
             logger.info("🔄 開始從 Workdo API 更新假日資料...")
-            
-            # 讀取現有的 leave_days.json（如果存在）
-            existing_leave_days = {}
-            if os.path.exists('leave_days.json'):
-                try:
-                    with open('leave_days.json', 'r', encoding='utf-8') as f:
-                        existing_leave_days = json.load(f)
-                    logger.info(f"📖 讀取現有請假日設定: {len(existing_leave_days)} 筆")
-                except Exception as e:
-                    logger.warning(f"⚠️ 讀取現有設定失敗: {str(e)}")
             
             # 查詢今年度假日
             current_year = datetime.now().year
@@ -232,83 +236,88 @@ class WorkdoAPI:
             # 使用 GET 方法，將參數作為 query parameters
             response = self.session.get(self.HOLIDAY_URL, params=query_data)
             logger.info(f"📥 HTTP 狀態碼: {response.status_code}")
-            response.raise_for_status()
             
-            data = response.json()
-            logger.info(f"📋 API 回應內容: {json.dumps(data, ensure_ascii=False, indent=2)}")
-            
-            new_holidays = {}
-            
-            # 解析假日資料
-            if 'list' in data:
-                for holiday in data['list']:
-                    if 'date' in holiday and 'name' in holiday:
-                        date_str = holiday['date']
-                        name = holiday.get('name', '假日')
-                        new_holidays[date_str] = name
-                        logger.info(f"   📅 {date_str}: {name}")
-            
-            if not new_holidays:
-                logger.warning("⚠️ API 未返回任何假日資料")
-                logger.info(f"💡 完整 API 回應: {json.dumps(data, ensure_ascii=False, indent=2)}")
-                
-                # 即使 API 沒有返回新資料，如果有現有資料也要保存
-                if existing_leave_days:
-                    logger.info(f"📝 將保留現有的 {len(existing_leave_days)} 筆假日資料")
-                    sorted_leave_days = dict(sorted(existing_leave_days.items()))
-                else:
-                    logger.warning("⚠️ 無現有資料，將建立空的假日檔案")
-                    sorted_leave_days = {}
+            # 如果狀態碼不是 2xx，記錄錯誤但不中斷
+            if response.status_code >= 400:
+                logger.error(f"❌ API 返回錯誤狀態碼: {response.status_code}")
+                logger.error(f"📋 回應內容: {response.text[:500]}")
             else:
-                # 合併現有資料和新查詢的假日（新查詢的假日會覆蓋舊的）
-                merged_leave_days = {**existing_leave_days, **new_holidays}
+                response.raise_for_status()
                 
-                # 按日期排序
-                sorted_leave_days = dict(sorted(merged_leave_days.items()))
-            
-            logger.info(f"💾 準備寫入 leave_days.json...")
-            
-            # 寫入 leave_days.json
-            try:
-                with open('leave_days.json', 'w', encoding='utf-8') as f:
-                    json.dump(sorted_leave_days, f, ensure_ascii=False, indent=2)
-                logger.info(f"✅ 成功寫入 leave_days.json")
-            except Exception as e:
-                logger.error(f"❌ 寫入檔案失敗: {str(e)}")
-                return False
-            
-            # 驗證文件是否正確寫入
-            if not os.path.exists('leave_days.json'):
-                logger.error(f"❌ 驗證失敗: leave_days.json 不存在")
-                return False
-            
-            file_size = os.path.getsize('leave_days.json')
-            logger.info(f"✅ 檔案驗證通過 (大小: {file_size} bytes)")
-            logger.info(f"📊 統計資訊:")
-            logger.info(f"   • 總計: {len(sorted_leave_days)} 筆假日資料")
-            logger.info(f"   • 從 API 新增/更新: {len(new_holidays)} 筆")
-            logger.info(f"   • 保留現有設定: {len(existing_leave_days)} 筆")
-            
-            # 即使沒有新資料，只要成功建立檔案就算成功
-            if len(sorted_leave_days) == 0:
-                logger.warning("⚠️ 檔案中沒有任何假日資料，但檔案已成功建立")
-            
-            return True
-            
+                data = response.json()
+                logger.info(f"📋 API 回應內容: {json.dumps(data, ensure_ascii=False, indent=2)}")
+                
+                # 解析假日資料
+                if 'list' in data:
+                    for holiday in data['list']:
+                        if 'date' in holiday and 'name' in holiday:
+                            date_str = holiday['date']
+                            name = holiday.get('name', '假日')
+                            new_holidays[date_str] = name
+                            logger.info(f"   📅 {date_str}: {name}")
+                    api_success = True
+                
+                if not new_holidays:
+                    logger.warning("⚠️ API 未返回任何假日資料")
+                    logger.info(f"💡 完整 API 回應: {json.dumps(data, ensure_ascii=False, indent=2)}")
+                
         except requests.exceptions.RequestException as e:
             logger.error(f"❌ API 請求失敗: {str(e)}")
             if hasattr(e, 'response') and e.response is not None:
                 logger.error(f"📥 HTTP 狀態碼: {e.response.status_code}")
-                logger.error(f"📋 回應內容: {e.response.text[:500]}")  # 只顯示前 500 字元
-            return False
+                logger.error(f"📋 回應內容: {e.response.text[:500]}")
         except json.JSONDecodeError as e:
             logger.error(f"❌ JSON 解析失敗: {str(e)}")
-            return False
         except Exception as e:
-            logger.error(f"❌ 更新假日資料時發生未預期的錯誤: {str(e)}")
+            logger.error(f"❌ 查詢假日資料時發生未預期的錯誤: {str(e)}")
+            import traceback
+            logger.error(f"錯誤堆疊: {traceback.format_exc()}")
+        
+        # 無論 API 是否成功，都要生成文件
+        logger.info("=" * 60)
+        logger.info("📝 準備生成 leave_days.json 文件...")
+        
+        if not new_holidays and not existing_leave_days:
+            logger.warning("⚠️ 無任何假日資料（無 API 資料也無現有資料），將建立空的 JSON 文件")
+            sorted_leave_days = {}
+        elif not new_holidays:
+            logger.info(f"📝 API 無新資料，保留現有的 {len(existing_leave_days)} 筆假日資料")
+            sorted_leave_days = dict(sorted(existing_leave_days.items()))
+        else:
+            # 合併現有資料和新查詢的假日（新查詢的假日會覆蓋舊的）
+            merged_leave_days = {**existing_leave_days, **new_holidays}
+            sorted_leave_days = dict(sorted(merged_leave_days.items()))
+        
+        logger.info(f"💾 準備寫入 leave_days.json...")
+        
+        # 寫入 leave_days.json（無論有無資料都寫入）
+        try:
+            with open('leave_days.json', 'w', encoding='utf-8') as f:
+                json.dump(sorted_leave_days, f, ensure_ascii=False, indent=2)
+            logger.info(f"✅ 成功寫入 leave_days.json")
+        except Exception as e:
+            logger.error(f"❌ 寫入檔案失敗: {str(e)}")
             import traceback
             logger.error(f"錯誤堆疊: {traceback.format_exc()}")
             return False
+        
+        # 驗證文件是否正確寫入
+        if not os.path.exists('leave_days.json'):
+            logger.error(f"❌ 驗證失敗: leave_days.json 不存在")
+            return False
+        
+        file_size = os.path.getsize('leave_days.json')
+        logger.info(f"✅ 檔案驗證通過 (大小: {file_size} bytes)")
+        logger.info(f"📊 統計資訊:")
+        logger.info(f"   • 總計: {len(sorted_leave_days)} 筆假日資料")
+        logger.info(f"   • 從 API 新增/更新: {len(new_holidays)} 筆")
+        logger.info(f"   • 保留現有設定: {len(existing_leave_days)} 筆")
+        
+        # 即使沒有新資料，只要成功建立檔案就算成功
+        if len(sorted_leave_days) == 0:
+            logger.warning("⚠️ 檔案中沒有任何假日資料，但檔案已成功建立")
+        
+        return True
     
     def query_missing_punch(self):
         """查詢缺卡記錄"""
