@@ -1,0 +1,76 @@
+name: 更新假日資料
+
+on:
+  # 定時執行（使用 UTC 時間）
+  schedule:
+    # 每週一 UTC 00:00 (台灣時間 08:00)
+    - cron: '0 0 * * 1'
+  
+  # 允許手動觸發
+  workflow_dispatch:
+
+env:
+  WORKDO_EMAIL: ${{ secrets.WORKDO_EMAIL }}
+  WORKDO_PASSWORD: ${{ secrets.WORKDO_PASSWORD }}
+  WORKDO_GPS_LOCATION: ${{ secrets.WORKDO_GPS_LOCATION }}
+  WORKDO_GPS_PLACE: ${{ secrets.WORKDO_GPS_PLACE }}
+  WORKDO_USE_LEAVE_API: ${{ secrets.WORKDO_USE_LEAVE_API }}
+  LEAVE_DAYS_JSON: ${{ secrets.LEAVE_DAYS_JSON }}
+  # 使用 Node.js 24 避免棄用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  update-holidays:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 檢出程式碼
+        uses: actions/checkout@v4
+      
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+      
+      - name: 安裝依賴套件
+        run: |
+          pip install -r requirements.txt
+      
+      - name: 建立現有請假日設定檔
+        if: env.LEAVE_DAYS_JSON != ''
+        run: |
+          echo '${{ secrets.LEAVE_DAYS_JSON }}' > leave_days.json
+          echo "📝 已載入現有請假日設定"
+      
+      - name: 從 Workdo API 更新假日資料
+        run: |
+          python workdo_auto_clock.py update-holidays
+      
+      - name: 顯示更新後的假日資料
+        if: always()
+        run: |
+          if [ -f leave_days.json ]; then
+            echo "📅 更新後的假日資料:"
+            cat leave_days.json
+          else
+            echo "⚠️ leave_days.json 不存在"
+          fi
+      
+      - name: 上傳更新後的假日資料
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leave-days-${{ github.run_number }}
+          path: leave_days.json
+          retention-days: 30
+      
+      - name: 上傳日誌
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-holidays-log-${{ github.run_number }}
+          path: |
+            *.log
+          retention-days: 7
+
