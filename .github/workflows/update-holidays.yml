@@ -97,6 +97,40 @@ jobs:
             echo "⚠️ leave_days.json 不存在"
           fi
       
+      - name: 寫入 Actions Summary（update-holidays 結果）
+        if: always()
+        run: |
+          python << 'EOF'
+          import json
+          import os
+          sm = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not sm:
+              print("GITHUB_STEP_SUMMARY 未設定，略過 Summary")
+              raise SystemExit(0)
+          lines = []
+          lines.append("## 🗓️ update-holidays 執行結果\n")
+          if os.path.isfile("leave_days.json"):
+              with open("leave_days.json", encoding="utf-8") as f:
+                  data = json.load(f)
+              lines.append(f"- **leave_days.json**：共 {len(data)} 筆\n\n")
+              lines.append("```json\n")
+              lines.append(json.dumps(data, ensure_ascii=False, indent=2))
+              lines.append("\n```\n\n")
+          else:
+              lines.append("- **leave_days.json**：未產生\n\n")
+          log_path = "update-holidays.log"
+          if os.path.isfile(log_path):
+              with open(log_path, encoding="utf-8", errors="replace") as f:
+                  tail = f.readlines()[-120:]
+              lines.append("<details><summary>update-holidays-tw 日誌（末 120 行）</summary>\n\n")
+              lines.append("```\n")
+              lines.extend(tail)
+              lines.append("\n```\n\n</details>\n")
+          with open(sm, "a", encoding="utf-8") as s:
+              s.write("".join(lines))
+          print("已寫入 Job Summary（Actions 執行結果 → Summary）")
+          EOF
+      
       - name: 上傳更新後的假日資料
         if: success()
         continue-on-error: true

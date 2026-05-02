@@ -69,6 +69,25 @@ jobs:
           test -f leave_days.json
           python -c "import json; d=json.load(open('leave_days.json')); print('合併後共', len(d), '筆假日')"
       
+      - name: 顯示 update-holidays-tw 合併結果
+        run: |
+          python << 'EOF'
+          import json
+          import os
+          with open("leave_days.json", encoding="utf-8") as f:
+              data = json.load(f)
+          sm = os.environ.get("GITHUB_STEP_SUMMARY")
+          if sm:
+              with open(sm, "a", encoding="utf-8") as s:
+                  s.write("## 🗓️ update-holidays-tw 合併結果\n\n")
+                  s.write(f"- 共 **{len(data)}** 筆（台灣行事曆 + `LEAVE_DAYS_JSON` Secret）\n\n")
+                  s.write("```json\n")
+                  s.write(json.dumps(data, ensure_ascii=False, indent=2))
+                  s.write("\n```\n")
+          print("===== leave_days.json（update-holidays-tw 後）=====")
+          print(json.dumps(data, ensure_ascii=False, indent=2))
+          EOF
+      
       - name: 判斷執行動作
         id: determine-action
         run: |
@@ -85,6 +104,36 @@ jobs:
       - name: 執行打卡
         run: |
           python workdo_auto_clock.py ${{ steps.determine-action.outputs.action }}
+      
+      - name: 顯示本次 job 結束後 leave_days.json（含 Workdo update-holidays）
+        if: always()
+        run: |
+          python << 'EOF'
+          import json
+          import os
+          import sys
+          path = "leave_days.json"
+          sm = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not os.path.isfile(path):
+              msg = "（無 leave_days.json，可能於合併步驟失敗）"
+              print(msg)
+              if sm:
+                  with open(sm, "a", encoding="utf-8") as s:
+                      s.write("\n## 📋 job 結束後假日檔\n\n")
+                      s.write(msg + "\n")
+              sys.exit(0)
+          with open(path, encoding="utf-8") as f:
+              data = json.load(f)
+          if sm:
+              with open(sm, "a", encoding="utf-8") as s:
+                  s.write("\n## 📋 job 結束後 leave_days.json\n\n")
+                  s.write("- 若動作為 **update-holidays**，此為 Workdo API 寫回後之內容。\n\n")
+                  s.write("```json\n")
+                  s.write(json.dumps(data, ensure_ascii=False, indent=2))
+                  s.write("\n```\n")
+          print("===== leave_days.json（job 結束後）=====")
+          print(json.dumps(data, ensure_ascii=False, indent=2))
+          EOF
       
       - name: 上傳日誌
         if: always()
