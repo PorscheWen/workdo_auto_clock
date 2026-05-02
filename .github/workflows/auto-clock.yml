@@ -31,8 +31,6 @@ env:
   WORKDO_GPS_PLACE: ${{ secrets.WORKDO_GPS_PLACE }}
   WORKDO_USE_LEAVE_API: ${{ secrets.WORKDO_USE_LEAVE_API }}
   LEAVE_DAYS_JSON: ${{ secrets.LEAVE_DAYS_JSON }}
-  # 使用 Node.js 24 避免棄用警告
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   auto-clock:
@@ -40,10 +38,10 @@ jobs:
     
     steps:
       - name: 檢出程式碼
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: 設定 Python 環境
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.9'
           cache: 'pip'
@@ -52,13 +50,24 @@ jobs:
         run: |
           pip install -r requirements.txt
       
+      # 使用 $LEAVE_DAYS_JSON 寫檔，避免 echo '...' 在 JSON 含單引號時被 shell 截斷
       - name: 建立請假日設定檔
         if: env.LEAVE_DAYS_JSON != ''
         run: |
-          echo '${{ secrets.LEAVE_DAYS_JSON }}' > leave_days.json
+          printf '%s\n' "$LEAVE_DAYS_JSON" > leave_days.json
+      
+      - name: 驗證 LEAVE_DAYS_JSON 可解析
+        if: env.LEAVE_DAYS_JSON != ''
+        run: |
+          python -c "import json; json.load(open('leave_days.json')); print('LEAVE_DAYS_JSON 格式正確')"
       
       - name: 合併台灣國定假日至 leave_days.json（與 Secret 並用）
         run: python workdo_auto_clock.py update-holidays-tw
+      
+      - name: 驗證合併後 leave_days.json
+        run: |
+          test -f leave_days.json
+          python -c "import json; d=json.load(open('leave_days.json')); print('合併後共', len(d), '筆假日')"
       
       - name: 判斷執行動作
         id: determine-action
@@ -79,7 +88,7 @@ jobs:
       
       - name: 上傳日誌
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: workdo-log-${{ github.run_number }}
           path: |

@@ -102,6 +102,8 @@ python workdo_auto_clock.py update-holidays
 
 系統會自動跳過這些日期的打卡。
 
+**為什麼 GitHub 上沒有 `leave_days.json`？** 此檔案已列入 [`.gitignore`](.gitignore)，避免個人請假日期被提交到公開儲存庫。請在本機複製範例：`cp leave_days.json.example leave_days.json` 再自行編輯。於 GitHub Actions 執行時，可使用 Secret **`LEAVE_DAYS_JSON`** 注入同等 JSON；排程 workflow 也會先執行 `update-holidays-tw` 合併台灣國定假日。
+
 ## 🤖 使用 GitHub Actions 自動執行（推薦）
 
 完全免費、無需自己的伺服器！

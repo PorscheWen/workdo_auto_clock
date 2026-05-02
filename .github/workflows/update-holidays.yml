@@ -16,8 +16,6 @@ env:
   WORKDO_GPS_PLACE: ${{ secrets.WORKDO_GPS_PLACE }}
   WORKDO_USE_LEAVE_API: ${{ secrets.WORKDO_USE_LEAVE_API }}
   LEAVE_DAYS_JSON: ${{ secrets.LEAVE_DAYS_JSON }}
-  # 使用 Node.js 24 避免棄用警告
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   update-holidays:
@@ -28,7 +26,7 @@ jobs:
         uses: actions/checkout@v5
       
       - name: 設定 Python 環境
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -60,8 +58,9 @@ jobs:
       - name: 建立現有請假日設定檔
         if: env.LEAVE_DAYS_JSON != ''
         run: |
-          echo '${{ secrets.LEAVE_DAYS_JSON }}' > leave_days.json
-          echo "📝 已載入現有請假日設定"
+          printf '%s\n' "$LEAVE_DAYS_JSON" > leave_days.json
+          python -c "import json; json.load(open('leave_days.json'))"
+          echo "📝 已載入現有請假日設定（JSON 已驗證）"
       
       - name: 從台灣政府公開資料更新假日
         run: |
@@ -101,7 +100,7 @@ jobs:
       - name: 上傳更新後的假日資料
         if: success()
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: leave-days-${{ github.run_number }}
           path: leave_days.json
@@ -111,7 +110,7 @@ jobs:
       - name: 上傳日誌
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: update-holidays-log-${{ github.run_number }}
           path: |
