@@ -57,6 +57,9 @@ jobs:
         run: |
           echo '${{ secrets.LEAVE_DAYS_JSON }}' > leave_days.json
       
+      - name: 合併台灣國定假日至 leave_days.json（與 Secret 並用）
+        run: python workdo_auto_clock.py update-holidays-tw
+      
       - name: 判斷執行動作
         id: determine-action
         run: |

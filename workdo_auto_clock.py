@@ -10,6 +10,7 @@ import json
 import argparse
 import requests
 from datetime import datetime, timedelta
+from functools import lru_cache
 from dotenv import load_dotenv
 import logging
 
@@ -23,6 +24,46 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# 與 WorkdoAPI.TAIWAN_CALENDAR_URL 相同來源，供 is_holiday 快取讀取
+TAIWAN_CALENDAR_DATA_URL = "https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data/{year}.json"
+
+
+def normalize_workdo_date(date_val):
+    """將 API 可能回傳的日期統一成 YYYY-MM-DD。"""
+    if date_val is None:
+        return None
+    s = str(date_val).strip()
+    if not s:
+        return None
+    s = s.replace("/", "-")
+    parts = s.split("-")
+    if len(parts) != 3:
+        return s
+    y, m, d = parts[0], parts[1], parts[2]
+    if not (y.isdigit() and m.isdigit() and d.isdigit()):
+        return s
+    return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+
+
+@lru_cache(maxsize=8)
+def fetch_taiwan_public_holiday_dates(year: int) -> frozenset:
+    """自台灣公開行事曆取得該年所有放假日（YYYY-MM-DD）。"""
+    url = TAIWAN_CALENDAR_DATA_URL.format(year=year)
+    response = requests.get(url, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    out = set()
+    for day in data:
+        if not day.get("isHoliday") or not day.get("description"):
+            continue
+        date_str = day.get("date")
+        if not date_str or len(str(date_str)) < 8:
+            continue
+        ds = str(date_str)
+        formatted = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
+        out.add(formatted)
+    return frozenset(out)
 
 
 class WorkdoAPI:
@@ -46,6 +87,9 @@ class WorkdoAPI:
         self.gps_location = os.getenv('WORKDO_GPS_LOCATION', '25.033,121.564')
         self.gps_place = os.getenv('WORKDO_GPS_PLACE', '台北市信義區')
         self.use_leave_api = os.getenv('WORKDO_USE_LEAVE_API', 'false').lower() == 'true'
+        # 與 leave_days.json、Workdo 假日 API 並用：預設啟用台灣公開行事曆略過國定假日（未設定或空字串皆為啟用）
+        _tw = (os.getenv('WORKDO_USE_TW_CALENDAR') or 'true').strip().lower()
+        self.use_tw_calendar = _tw in ('true', '1', 'yes')
         
         self.session = requests.Session()
         self.session.headers.update({
@@ -198,7 +242,9 @@ class WorkdoAPI:
             if 'list' in data:
                 for holiday in data['list']:
                     if 'date' in holiday:
-                        holidays.append(holiday['date'])
+                        nd = normalize_workdo_date(holiday['date'])
+                        if nd:
+                            holidays.append(nd)
             
             logger.info(f"✅ 找到 {len(holidays)} 個假日")
             return holidays
@@ -254,7 +300,8 @@ class WorkdoAPI:
                 if 'list' in data:
                     for holiday in data['list']:
                         if 'date' in holiday and 'name' in holiday:
-                            date_str = holiday['date']
+                            raw = holiday['date']
+                            date_str = normalize_workdo_date(raw) or str(raw)
                             name = holiday.get('name', '假日')
                             new_holidays[date_str] = name
                             logger.info(f"   📅 {date_str}: {name}")
@@ -496,15 +543,16 @@ class WorkdoAPI:
             return False
     
     def is_holiday(self):
-        """檢查今天是否為假日"""
-        today = datetime.now().strftime('%Y-%m-%d')
+        """檢查今天是否為假日（週末 / leave_days.json / 台灣行事曆 / Workdo 假日 API 並用）"""
+        now = datetime.now()
+        today = now.strftime('%Y-%m-%d')
         
         # 檢查週末
-        if datetime.now().weekday() >= 5:  # 5=週六, 6=週日
+        if now.weekday() >= 5:  # 5=週六, 6=週日
             logger.info("📅 今天是週末")
             return True
         
-        # 檢查請假日設定（從 JSON 檔案）
+        # 檢查請假日設定（從 JSON 檔案；可含手動請假、或由 update-holidays* 合併）
         if os.path.exists('leave_days.json'):
             try:
                 with open('leave_days.json', 'r', encoding='utf-8') as f:
@@ -515,10 +563,20 @@ class WorkdoAPI:
             except Exception as e:
                 logger.warning(f"⚠️ 讀取請假日設定失敗: {str(e)}")
         
-        # 使用 API 查詢假日
+        # 台灣公開行事曆（國定假日等），不需 Workdo 登入額外權限
+        if self.use_tw_calendar:
+            try:
+                tw_dates = fetch_taiwan_public_holiday_dates(now.year)
+                if today in tw_dates:
+                    logger.info("📅 今天是台灣公開行事曆之放假日")
+                    return True
+            except Exception as e:
+                logger.warning(f"⚠️ 台灣行事曆取得失敗，略過此項: {str(e)}")
+        
+        # Workdo 公司行事曆（需 WORKDO_USE_LEAVE_API=true）
         holidays = self.query_holidays()
         if today in holidays:
-            logger.info("📅 今天是假日")
+            logger.info("📅 今天是 Workdo 行事曆假日")
             return True
         
         return False
