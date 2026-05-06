@@ -3,10 +3,22 @@ name: Workdo 自動打卡
 on:
   # 定時執行（使用 UTC 時間）
   schedule:
-    # 上班打卡：每週一至週五 UTC 00:30 (台灣時間 08:30)
+    # 上班打卡：每週一至週五 UTC 00:30 起每 5 分鐘重試到 01:00（台灣時間 08:30-09:00）
     - cron: '30 0 * * 1-5'
-    # 下班打卡：每週一至週五 UTC 08:00 (台灣時間 16:00)
-    - cron: '0 8 * * 1-5'
+    - cron: '35 0 * * 1-5'
+    - cron: '40 0 * * 1-5'
+    - cron: '45 0 * * 1-5'
+    - cron: '50 0 * * 1-5'
+    - cron: '55 0 * * 1-5'
+    - cron: '0 1 * * 1-5'
+    # 下班打卡：每週一至週五 UTC 10:00 起每 5 分鐘重試到 10:30（台灣時間 18:00-18:30）
+    - cron: '0 10 * * 1-5'
+    - cron: '5 10 * * 1-5'
+    - cron: '10 10 * * 1-5'
+    - cron: '15 10 * * 1-5'
+    - cron: '20 10 * * 1-5'
+    - cron: '25 10 * * 1-5'
+    - cron: '30 10 * * 1-5'
   
   # 允許手動觸發
   workflow_dispatch:
@@ -63,6 +75,10 @@ jobs:
       
       - name: 合併台灣國定假日至 leave_days.json（與 Secret 並用）
         run: python workdo_auto_clock.py update-holidays-tw
+
+      - name: 使用 Workdo 假期資料更新 leave_days.json（對齊 update-holidays.yml）
+        if: env.WORKDO_USE_LEAVE_API == 'true'
+        run: python workdo_auto_clock.py update-holidays
       
       - name: 驗證合併後 leave_days.json
         run: |
@@ -93,9 +109,21 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "30 0 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "30 0 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "35 0 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "40 0 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "45 0 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "50 0 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "55 0 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "0 1 * * 1-5" ]; then
             echo "action=in" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 8 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 10 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "5 10 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "10 10 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "15 10 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "20 10 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "25 10 * * 1-5" ] || \
+               [ "${{ github.event.schedule }}" = "30 10 * * 1-5" ]; then
             echo "action=out" >> $GITHUB_OUTPUT
           else
             echo "action=auto" >> $GITHUB_OUTPUT
