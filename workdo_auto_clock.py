@@ -771,22 +771,22 @@ def main():
                 workdo.supplement_missing_punch(record)
         
         # 根據時間判斷上下班
-        # 上班打卡：8:30-9:00（含 9:00）
-        if 830 <= current_time <= 900:
+        # 上班打卡：8:00-8:30（含 8:30）
+        if 800 <= current_time <= 830:
             logger.info(f"🌅 早上時段 ({current_hour:02d}:{current_minute:02d})，執行上班打卡")
             if workdo.has_punched_type_today('ClockIn'):
                 logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
             else:
                 workdo.clock_in()
-        # 下班打卡：18:00-18:30（含 18:30）
-        elif 1800 <= current_time <= 1830:
+        # 下班打卡：17:45-18:15（含 18:15）
+        elif 1745 <= current_time <= 1815:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
             if workdo.has_punched_type_today('ClockOut'):
                 logger.info("ℹ️ 今日已完成下班打卡，略過重複執行")
             else:
                 workdo.clock_out()
         else:
-            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:30-9:00, 下班: 18:00-18:30）")
+            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-8:30, 下班: 17:45-18:15）")
         
         workdo.get_punch_status()
     
