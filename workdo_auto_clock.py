@@ -789,8 +789,8 @@ def main():
                 sys.exit(1)
     
     elif args.action == 'auto':
-        # 智慧判斷：根據時間自動打卡
-        now = datetime.now()
+        # 智慧判斷：根據時間自動打卡（使用台灣時間）
+        now = get_taiwan_now()
         current_hour = now.hour
         current_minute = now.minute
         current_time = current_hour * 100 + current_minute  # 例如 8:30 = 830, 17:30 = 1730
@@ -813,7 +813,13 @@ def main():
         # 下班打卡：17:30-18:30（含 18:30），對齊「排程 17:30、截止 18:30」之防護機制
         elif 1730 <= current_time <= 1830:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
-            if workdo.has_punched_type_today('ClockOut'):
+            # 檢查是否超過截止時間
+            if is_past_clock_out_cutoff(now):
+                logger.warning(
+                    f"⛔ 目前台灣時間 {now.strftime('%H:%M')} 已超過下班打卡截止時間 "
+                    f"{CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}，放棄本次下班打卡（防止打卡時間過晚）。"
+                )
+            elif workdo.has_punched_type_today('ClockOut'):
                 logger.info("ℹ️ 今日已完成下班打卡，略過重複執行")
             else:
                 workdo.clock_out()
