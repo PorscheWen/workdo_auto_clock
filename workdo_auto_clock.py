@@ -803,15 +803,15 @@ def main():
                 workdo.supplement_missing_punch(record)
         
         # 根據時間判斷上下班（與 Actions 單次 cron 對齊；下班區間含延遲以支援手動 auto）
-        # 上班打卡：8:15-8:45（含 8:45）
-        if 815 <= current_time <= 845:
+        # 上班打卡：8:00-8:30（含 8:30）
+        if 800 <= current_time <= 830:
             logger.info(f"🌅 早上時段 ({current_hour:02d}:{current_minute:02d})，執行上班打卡")
             if workdo.has_punched_type_today('ClockIn'):
                 logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
             else:
                 workdo.clock_in()
-        # 下班打卡：17:15-18:15（含 18:15），對齊「排程 17:15、截止 18:15」之防護機制
-        elif 1715 <= current_time <= 1815:
+        # 下班打卡：17:30-18:00（含 18:00），對齊「排程 17:30、截止 18:00」之防護機制
+        elif 1730 <= current_time <= 1800:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
             # 檢查是否超過截止時間
             if is_past_clock_out_cutoff(now):
@@ -824,7 +824,7 @@ def main():
             else:
                 workdo.clock_out()
         else:
-            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:15-8:45, 下班: 17:15-18:15）")
+            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-8:30, 下班: 17:30-18:00）")
         
         workdo.get_punch_status()
     
