@@ -9,6 +9,7 @@ import sys
 import json
 import argparse
 import requests
+import time
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from dotenv import load_dotenv
@@ -25,6 +26,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 記錄程式啟動時間（用於診斷 GitHub Actions 延遲）
+PROGRAM_START_TIME = time.time()
+PROGRAM_START_DATETIME = datetime.now(tz=timezone.utc)
+
 # 與 WorkdoAPI.TAIWAN_CALENDAR_URL 相同來源，供 is_holiday 快取讀取
 TAIWAN_CALENDAR_DATA_URL = "https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data/{year}.json"
 
@@ -35,14 +40,39 @@ TAIWAN_TZ = timezone(timedelta(hours=8))
 CLOCK_OUT_CUTOFF_HOUR = 18
 CLOCK_OUT_CUTOFF_MINUTE = 15
 
+# 下班打卡「安全執行截止時間」：比實際截止時間提前 3 分鐘，確保 API 延遲不會導致打卡時間超過截止
+CLOCK_OUT_SAFE_CUTOFF_MINUTE = CLOCK_OUT_CUTOFF_MINUTE - 3  # 18:12 開始不再發送打卡請求
+
 
 def get_taiwan_now() -> datetime:
     """取得目前的台灣時間（UTC+8），不論執行環境是 UTC 或本地時區皆可正確比對。"""
     return datetime.now(tz=timezone.utc).astimezone(TAIWAN_TZ)
 
 
+def get_elapsed_time() -> float:
+    """取得程式啟動以來的經過時間（秒）"""
+    return time.time() - PROGRAM_START_TIME
+
+
+def log_time_diagnostic():
+    """記錄時間診斷信息（用於排查 GitHub Actions 延遲）"""
+    elapsed = get_elapsed_time()
+    now_utc = datetime.now(tz=timezone.utc)
+    now_tw = get_taiwan_now()
+    
+    logger.info("=" * 60)
+    logger.info("⏱️  時間診斷信息")
+    logger.info("=" * 60)
+    logger.info(f"程式啟動時間 (UTC): {PROGRAM_START_DATETIME.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"程式啟動時間 (台灣): {PROGRAM_START_DATETIME.astimezone(TAIWAN_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"目前時間 (UTC):      {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"目前時間 (台灣):     {now_tw.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"程式已執行:         {elapsed:.2f} 秒")
+    logger.info("=" * 60)
+
+
 def is_past_clock_out_cutoff(now_tw: datetime = None) -> bool:
-    """判斷目前是否已過下班打卡截止時間（台灣時間 18:30）。"""
+    """判斷目前是否已過下班打卡截止時間（台灣時間 18:15）。"""
     now_tw = now_tw or get_taiwan_now()
     cutoff = now_tw.replace(
         hour=CLOCK_OUT_CUTOFF_HOUR,
@@ -51,6 +81,19 @@ def is_past_clock_out_cutoff(now_tw: datetime = None) -> bool:
         microsecond=0,
     )
     return now_tw > cutoff
+
+
+def is_past_clock_out_safe_cutoff(now_tw: datetime = None) -> bool:
+    """判斷目前是否已過下班打卡「安全執行截止時間」（台灣時間 18:12）。
+    此時間比實際截止時間提前 3 分鐘，確保即使 API 有延遲，打卡時間仍在 18:15 內。"""
+    now_tw = now_tw or get_taiwan_now()
+    safe_cutoff = now_tw.replace(
+        hour=CLOCK_OUT_CUTOFF_HOUR,
+        minute=CLOCK_OUT_SAFE_CUTOFF_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    return now_tw > safe_cutoff
 
 
 def normalize_workdo_date(date_val):
@@ -148,13 +191,22 @@ class WorkdoAPI:
                 'loginPhone': None
             }
             
+            login_start_time = time.time()
+            login_start_tw = get_taiwan_now()
+            
             logger.info("🔐 正在登入...")
+            logger.info(f"   系統時間: {login_start_tw.strftime('%H:%M:%S')}")
+            
             response = self.session.post(self.LOGIN_URL, json=login_data)
             response.raise_for_status()
             
+            login_time = time.time() - login_start_time
+            login_end_tw = get_taiwan_now()
+            
             data = response.json()
             if 'bddUserData' in data:
-                logger.info(f"✅ 登入成功 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.info(f"✅ 登入成功 - {login_end_tw.strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.info(f"   ⏱️  登入耗時: {login_time:.2f} 秒")
                 return True
             else:
                 logger.error("❌ 登入失敗: 無法取得使用者資料")
@@ -162,7 +214,7 @@ class WorkdoAPI:
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"❌ 登入失敗: {str(e)}")
-            if hasattr(e.response, 'text'):
+            if hasattr(e, 'response') and e.response is not None:
                 logger.error(f"回應內容: {e.response.text}")
             return False
     
@@ -173,6 +225,15 @@ class WorkdoAPI:
             punch_type: 'ClockIn' 或 'ClockOut'
         """
         try:
+            punch_name = "上班" if punch_type == "ClockIn" else "下班"
+            
+            # 記錄打卡前的系統時間
+            pre_punch_time = get_taiwan_now()
+            pre_punch_timestamp = time.time()
+            
+            logger.info(f"⏰ 執行{punch_name}打卡...")
+            logger.info(f"   系統時間 (打卡前): {pre_punch_time.strftime('%H:%M:%S')}")
+            
             # 解析 GPS 座標
             lat, lon = self.gps_location.split(',')
             # 嘗試 WKT POINT 格式（經度 緯度）
@@ -185,16 +246,36 @@ class WorkdoAPI:
                 'gpsPlace': self.gps_place
             }
             
-            punch_name = "上班" if punch_type == "ClockIn" else "下班"
-            logger.info(f"⏰ 執行{punch_name}打卡...")
+            # 記錄 API 請求前的時間
+            api_request_start = time.time()
             
             response = self.session.post(self.PUNCH_URL, json=punch_data)
             response.raise_for_status()
             
+            # 計算 API 請求耗時
+            api_request_time = time.time() - api_request_start
+            
             data = response.json()
             if 'punchTime' in data:
-                punch_time = data['punchTime'].replace('+0800', '')
-                logger.info(f"✅ {punch_name}打卡成功 - {punch_time}")
+                punch_time_str = data['punchTime'].replace('+0800', '')
+                
+                # 記錄打卡後的系統時間
+                post_punch_time = get_taiwan_now()
+                post_punch_timestamp = time.time()
+                total_punch_time = post_punch_timestamp - pre_punch_timestamp
+                
+                logger.info(f"✅ {punch_name}打卡成功")
+                logger.info(f"   Workdo 記錄時間: {punch_time_str}")
+                logger.info(f"   系統時間 (打卡後): {post_punch_time.strftime('%H:%M:%S')}")
+                logger.info(f"   ⏱️  API 耗時: {api_request_time:.2f} 秒")
+                logger.info(f"   ⏱️  打卡全程耗時: {total_punch_time:.2f} 秒")
+                
+                # 對下班打卡進行時間驗證
+                if punch_type == 'ClockOut':
+                    if not self._verify_clock_out_time(punch_time_str):
+                        logger.warning(f"⚠️ 下班打卡時間 {punch_time_str} 晚於截止時間")
+                        return False
+                
                 return True
             else:
                 logger.warning(f"⚠️ {punch_name}打卡可能失敗，請檢查回應")
@@ -202,9 +283,53 @@ class WorkdoAPI:
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"❌ {punch_name}打卡失敗: {str(e)}")
-            if hasattr(e.response, 'text'):
+            api_time = time.time() - pre_punch_timestamp
+            logger.error(f"   ⏱️  耗時: {api_time:.2f} 秒")
+            if hasattr(e, 'response') and e.response is not None:
                 logger.error(f"回應內容: {e.response.text}")
             return False
+    
+    def _verify_clock_out_time(self, punch_time_str: str) -> bool:
+        """驗證下班打卡時間是否在截止時間內"""
+        try:
+            # 解析打卡時間 (格式: "2026-06-25 18:20:30" 或類似)
+            # 嘗試多種時間格式
+            punch_time = None
+            for fmt in ['%Y-%m-%d %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%d-%m-%Y %H:%M:%S']:
+                try:
+                    punch_time = datetime.strptime(punch_time_str, fmt)
+                    break
+                except ValueError:
+                    continue
+            
+            if not punch_time:
+                logger.warning(f"⚠️ 無法解析打卡時間格式: {punch_time_str}，跳過驗證")
+                return True  # 無法解析時仍視為成功，避免影響正常流程
+            
+            # 建立截止時間（今天 18:15）
+            cutoff_time = datetime.now().replace(
+                hour=CLOCK_OUT_CUTOFF_HOUR,
+                minute=CLOCK_OUT_CUTOFF_MINUTE,
+                second=0,
+                microsecond=0
+            )
+            
+            if punch_time > cutoff_time:
+                logger.warning(
+                    f"⚠️ 下班打卡時間 {punch_time.strftime('%H:%M:%S')} "
+                    f"晚於截止時間 {cutoff_time.strftime('%H:%M:%S')}"
+                )
+                return False
+            else:
+                logger.info(
+                    f"✓ 下班打卡時間 {punch_time.strftime('%H:%M:%S')} "
+                    f"在截止時間 {cutoff_time.strftime('%H:%M:%S')} 內"
+                )
+                return True
+                
+        except Exception as e:
+            logger.warning(f"⚠️ 驗證打卡時間時發生錯誤: {str(e)}，跳過驗證")
+            return True  # 驗證失敗時仍視為成功，避免影響正常流程
     
     def clock_in(self):
         """上班打卡"""
@@ -621,6 +746,9 @@ def main():
     # 載入環境變數
     load_dotenv()
     
+    # 記錄時間診斷信息
+    log_time_diagnostic()
+    
     # 解析命令列參數
     parser = argparse.ArgumentParser(description='Workdo 自動打卡系統')
     parser.add_argument(
@@ -726,10 +854,12 @@ def main():
     elif args.action == 'out':
         # 下班打卡
         now_tw = get_taiwan_now()
-        if is_past_clock_out_cutoff(now_tw):
+        if is_past_clock_out_safe_cutoff(now_tw):
             logger.warning(
-                f"⛔ 目前台灣時間 {now_tw.strftime('%H:%M')} 已超過下班打卡截止時間 "
-                f"{CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}，放棄本次下班打卡（防止打卡時間過晚）。"
+                f"⛔ 目前台灣時間 {now_tw.strftime('%H:%M:%S')} "
+                f"已超過下班打卡安全截止時間 {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_SAFE_CUTOFF_MINUTE:02d}"
+                f"（實際截止: {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}），"
+                f"放棄本次下班打卡，防止打卡時間超過截止時間。"
             )
             workdo.get_punch_status()
             sys.exit(0)
@@ -813,11 +943,13 @@ def main():
         # 下班打卡：17:30-18:00（含 18:00），對齊「排程 17:30、截止 18:00」之防護機制
         elif 1730 <= current_time <= 1800:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
-            # 檢查是否超過截止時間
-            if is_past_clock_out_cutoff(now):
+            # 檢查是否超過安全截止時間
+            if is_past_clock_out_safe_cutoff(now):
                 logger.warning(
-                    f"⛔ 目前台灣時間 {now.strftime('%H:%M')} 已超過下班打卡截止時間 "
-                    f"{CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}，放棄本次下班打卡（防止打卡時間過晚）。"
+                    f"⛔ 目前台灣時間 {now.strftime('%H:%M:%S')} "
+                    f"已超過下班打卡安全截止時間 {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_SAFE_CUTOFF_MINUTE:02d}"
+                    f"（實際截止: {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}），"
+                    f"放棄本次下班打卡（防止打卡時間超過截止時間）。"
                 )
             elif workdo.has_punched_type_today('ClockOut'):
                 logger.info("ℹ️ 今日已完成下班打卡，略過重複執行")
@@ -829,6 +961,7 @@ def main():
         workdo.get_punch_status()
     
     logger.info("✨ 執行完成")
+    logger.info(f"⏱️  程式總執行時間: {get_elapsed_time():.2f} 秒")
 
 
 if __name__ == '__main__':
