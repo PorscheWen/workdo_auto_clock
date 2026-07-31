@@ -843,30 +843,31 @@ def main():
             sys.exit(0)
     
     # 執行對應動作
+    punch_ok = True
+
     if args.action == 'in':
         # 上班打卡
         if workdo.has_punched_type_today('ClockIn'):
             logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
         else:
-            workdo.clock_in()
+            punch_ok = workdo.clock_in()
         workdo.get_punch_status()
         
     elif args.action == 'out':
-        # 下班打卡
+        # 下班打卡（僅在超過實際截止 17:45 時放棄，不再使用 17:42 安全截止）
         now_tw = get_taiwan_now()
-        if is_past_clock_out_safe_cutoff(now_tw):
-            logger.warning(
+        if is_past_clock_out_cutoff(now_tw):
+            logger.error(
                 f"⛔ 目前台灣時間 {now_tw.strftime('%H:%M:%S')} "
-                f"已超過下班打卡安全截止時間 {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_SAFE_CUTOFF_MINUTE:02d}"
-                f"（實際截止: {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}），"
-                f"放棄本次下班打卡，防止打卡時間超過截止時間。"
+                f"已超過下班打卡截止時間 {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}，"
+                f"無法完成本次下班打卡。"
             )
             workdo.get_punch_status()
-            sys.exit(0)
+            sys.exit(1)
         if workdo.has_punched_type_today('ClockOut'):
             logger.info("ℹ️ 今日已完成下班打卡，略過重複執行")
         else:
-            workdo.clock_out()
+            punch_ok = workdo.clock_out()
         workdo.get_punch_status()
         
     elif args.action == 'status':
@@ -933,35 +934,38 @@ def main():
                 workdo.supplement_missing_punch(record)
         
         # 根據時間判斷上下班（與 Actions 單次 cron 對齊；下班區間含延遲以支援手動 auto）
-        # 上班打卡：8:00-8:30（含 8:30）
-        if 800 <= current_time <= 830:
+        # 上班打卡：8:00-9:00（含 9:00），容許 Actions 延遲
+        if 800 <= current_time <= 900:
             logger.info(f"🌅 早上時段 ({current_hour:02d}:{current_minute:02d})，執行上班打卡")
             if workdo.has_punched_type_today('ClockIn'):
                 logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
             else:
-                workdo.clock_in()
-        # 下班打卡：17:00-17:30（含 17:30），對齊「排程 17:00、截止 17:45」之防護機制
-        elif 1700 <= current_time <= 1730:
+                punch_ok = workdo.clock_in()
+        # 下班打卡：16:00-18:00（含 18:00），對齊「排程 15:00、截止 17:45」之防護機制
+        elif 1600 <= current_time <= 1800:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
-            # 檢查是否超過安全截止時間
-            if is_past_clock_out_safe_cutoff(now):
-                logger.warning(
+            if is_past_clock_out_cutoff(now):
+                logger.error(
                     f"⛔ 目前台灣時間 {now.strftime('%H:%M:%S')} "
-                    f"已超過下班打卡安全截止時間 {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_SAFE_CUTOFF_MINUTE:02d}"
-                    f"（實際截止: {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}），"
-                    f"放棄本次下班打卡（防止打卡時間超過截止時間）。"
+                    f"已超過下班打卡截止時間 {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}，"
+                    f"無法完成本次下班打卡。"
                 )
+                punch_ok = False
             elif workdo.has_punched_type_today('ClockOut'):
                 logger.info("ℹ️ 今日已完成下班打卡，略過重複執行")
             else:
-                workdo.clock_out()
+                punch_ok = workdo.clock_out()
         else:
-            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-8:30, 下班: 17:00-17:30）")
+            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-9:00, 下班: 16:00-18:00）")
         
         workdo.get_punch_status()
     
     logger.info("✨ 執行完成")
     logger.info(f"⏱️  程式總執行時間: {get_elapsed_time():.2f} 秒")
+
+    if args.action in ('in', 'out', 'auto') and not punch_ok:
+        logger.error("❌ 打卡未成功完成")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
