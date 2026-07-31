@@ -3,16 +3,36 @@ name: Workdo 自動打卡
 on:
   # 定時執行（使用 UTC 時間）
   schedule:
-    # 上班打卡：台灣 07:30 / 08:30 / 09:30 / 10:00 備援（允許打卡 07:30-10:30）
-    - cron: '30 23 * * 0-4'
-    - cron: '30 0 * * 1-5'
-    - cron: '30 1 * * 1-5'
-    - cron: '0 2 * * 1-5'
-    # 下班打卡：台灣 15:00 / 16:00 / 17:00 / 18:00 備援（允許打卡 15:00-18:30）
-    - cron: '0 7 * * 1-5'
-    - cron: '0 8 * * 1-5'
-    - cron: '0 9 * * 1-5'
-    - cron: '0 10 * * 1-5'
+    # 上班打卡：台灣 07:30-10:30 每 15 分鐘觸發（提高 Actions 延遲時的命中率）
+    - cron: '30 23 * * 0-4'   # 07:30 TW（週一～五）
+    - cron: '45 23 * * 0-4'   # 07:45 TW
+    - cron: '0 0 * * 1-5'     # 08:00 TW
+    - cron: '15 0 * * 1-5'    # 08:15 TW
+    - cron: '30 0 * * 1-5'    # 08:30 TW
+    - cron: '45 0 * * 1-5'    # 08:45 TW
+    - cron: '0 1 * * 1-5'     # 09:00 TW
+    - cron: '15 1 * * 1-5'    # 09:15 TW
+    - cron: '30 1 * * 1-5'    # 09:30 TW
+    - cron: '45 1 * * 1-5'    # 09:45 TW
+    - cron: '0 2 * * 1-5'     # 10:00 TW
+    - cron: '15 2 * * 1-5'    # 10:15 TW
+    - cron: '30 2 * * 1-5'    # 10:30 TW
+    # 下班打卡：台灣 15:00-18:30 每 15 分鐘觸發
+    - cron: '0 7 * * 1-5'     # 15:00 TW
+    - cron: '15 7 * * 1-5'    # 15:15 TW
+    - cron: '30 7 * * 1-5'    # 15:30 TW
+    - cron: '45 7 * * 1-5'    # 15:45 TW
+    - cron: '0 8 * * 1-5'     # 16:00 TW
+    - cron: '15 8 * * 1-5'    # 16:15 TW
+    - cron: '30 8 * * 1-5'    # 16:30 TW
+    - cron: '45 8 * * 1-5'    # 16:45 TW
+    - cron: '0 9 * * 1-5'     # 17:00 TW
+    - cron: '15 9 * * 1-5'    # 17:15 TW
+    - cron: '30 9 * * 1-5'    # 17:30 TW
+    - cron: '45 9 * * 1-5'    # 17:45 TW
+    - cron: '0 10 * * 1-5'    # 18:00 TW
+    - cron: '15 10 * * 1-5'   # 18:15 TW
+    - cron: '30 10 * * 1-5'   # 18:30 TW
   
   # 允許手動觸發
   workflow_dispatch:
@@ -103,16 +123,12 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "30 23 * * 0-4" ] || [ "${{ github.event.schedule }}" = "30 0 * * 1-5" ] || [ "${{ github.event.schedule }}" = "30 1 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 2 * * 1-5" ]; then
-            echo "action=in" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 7 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 8 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 9 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 10 * * 1-5" ]; then
-            echo "action=out" >> $GITHUB_OUTPUT
           else
-            # github.event.schedule 有時比對失敗，改依台灣時間判斷（避免誤用 auto 而漏打卡）
+            # 排程觸發一律依「實際執行當下」的台灣時間判斷（不受 cron 延遲影響）
             TW_HOUR=$(TZ=Asia/Taipei date +%H)
             TW_MIN=$(TZ=Asia/Taipei date +%M)
             TW_TIME=$((10#$TW_HOUR * 100 + 10#$TW_MIN))
-            echo "⚠️ schedule 未匹配 (${{ github.event.schedule }})，依台灣時間 ${TW_HOUR}:${TW_MIN} 判斷" >&2
+            echo "排程觸發 (${{ github.event.schedule }})，台灣時間 ${TW_HOUR}:${TW_MIN}" >&2
             if [ "$TW_TIME" -ge 730 ] && [ "$TW_TIME" -le 1030 ]; then
               echo "action=in" >> $GITHUB_OUTPUT
             elif [ "$TW_TIME" -ge 1500 ] && [ "$TW_TIME" -le 1830 ]; then
@@ -164,4 +180,3 @@ jobs:
           path: |
             *.log
           retention-days: 7
-
