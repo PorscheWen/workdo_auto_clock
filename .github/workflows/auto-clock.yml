@@ -3,11 +3,14 @@ name: Workdo 自動打卡
 on:
   # 定時執行（使用 UTC 時間）
   schedule:
-    # 上班打卡：台灣 08:00 / 09:00 / 10:00 備援（允許打卡 08:00-10:30）
-    - cron: '0 0 * * 1-5'
-    - cron: '0 1 * * 1-5'
+    # 上班打卡：台灣 07:30 / 08:30 / 09:30 / 10:00 備援（允許打卡 07:30-10:30）
+    - cron: '30 23 * * 0-4'
+    - cron: '30 0 * * 1-5'
+    - cron: '30 1 * * 1-5'
     - cron: '0 2 * * 1-5'
-    # 下班打卡：每週一至週五 UTC 09:00（台灣 17:00）與 10:00（台灣 18:00 備援），允許打卡 17:00-18:30
+    # 下班打卡：台灣 15:00 / 16:00 / 17:00 / 18:00 備援（允許打卡 15:00-18:30）
+    - cron: '0 7 * * 1-5'
+    - cron: '0 8 * * 1-5'
     - cron: '0 9 * * 1-5'
     - cron: '0 10 * * 1-5'
   
@@ -100,9 +103,9 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 0 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 1 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 2 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "30 23 * * 0-4" ] || [ "${{ github.event.schedule }}" = "30 0 * * 1-5" ] || [ "${{ github.event.schedule }}" = "30 1 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 2 * * 1-5" ]; then
             echo "action=in" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 9 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 10 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 7 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 8 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 9 * * 1-5" ] || [ "${{ github.event.schedule }}" = "0 10 * * 1-5" ]; then
             echo "action=out" >> $GITHUB_OUTPUT
           else
             # github.event.schedule 有時比對失敗，改依台灣時間判斷（避免誤用 auto 而漏打卡）
@@ -110,9 +113,9 @@ jobs:
             TW_MIN=$(TZ=Asia/Taipei date +%M)
             TW_TIME=$((10#$TW_HOUR * 100 + 10#$TW_MIN))
             echo "⚠️ schedule 未匹配 (${{ github.event.schedule }})，依台灣時間 ${TW_HOUR}:${TW_MIN} 判斷" >&2
-            if [ "$TW_TIME" -ge 800 ] && [ "$TW_TIME" -le 1030 ]; then
+            if [ "$TW_TIME" -ge 730 ] && [ "$TW_TIME" -le 1030 ]; then
               echo "action=in" >> $GITHUB_OUTPUT
-            elif [ "$TW_TIME" -ge 1700 ] && [ "$TW_TIME" -le 1830 ]; then
+            elif [ "$TW_TIME" -ge 1500 ] && [ "$TW_TIME" -le 1830 ]; then
               echo "action=out" >> $GITHUB_OUTPUT
             else
               echo "action=auto" >> $GITHUB_OUTPUT
