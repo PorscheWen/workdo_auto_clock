@@ -3,8 +3,8 @@ name: Workdo 自動打卡
 on:
   # 定時執行（使用 UTC 時間）
   schedule:
-    # 上班打卡：每週一至週五 UTC 00:00（台灣時間 08:00），每日僅觸發一次
-    - cron: '0 0 * * 1-5'
+    # 上班打卡：每週日至週四 UTC 23:30（台灣時間週一至週五 07:30），每日僅觸發一次
+    - cron: '30 23 * * 0-4'
     # 下班打卡：每週一至週五 UTC 09:00（台灣時間 17:00），每日僅觸發一次
     - cron: '0 9 * * 1-5'
   
@@ -33,10 +33,10 @@ env:
   LEAVE_DAYS_JSON: ${{ secrets.LEAVE_DAYS_JSON }}
 
 jobs:
-  # 上班打卡 Job（僅在 00:00 UTC 排程時執行）
+  # 上班打卡 Job（僅在 23:30 UTC 排程時執行）
   clock-in:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 0 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'in')
+    if: github.event.schedule == '30 23 * * 0-4' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'in')
     
     steps:
       - name: 檢出程式碼
