@@ -44,7 +44,7 @@ CLOCK_IN_CUTOFF_MINUTE = 30
 
 # 下班打卡允許時間（台灣時間）
 CLOCK_OUT_START_HOUR = 17
-CLOCK_OUT_START_MINUTE = 0
+CLOCK_OUT_START_MINUTE = 30
 CLOCK_OUT_CUTOFF_HOUR = 18
 CLOCK_OUT_CUTOFF_MINUTE = 30
 
@@ -115,7 +115,7 @@ def _clock_out_boundary(now_tw: datetime, hour: int, minute: int) -> datetime:
 
 
 def is_before_clock_out_window(now_tw: datetime = None) -> bool:
-    """判斷目前是否尚未到下班打卡開始時間（台灣時間 17:00）。"""
+    """判斷目前是否尚未到下班打卡開始時間（台灣時間 17:30）。"""
     now_tw = now_tw or get_taiwan_now()
     start = _clock_out_boundary(now_tw, CLOCK_OUT_START_HOUR, CLOCK_OUT_START_MINUTE)
     return now_tw < start
@@ -129,7 +129,7 @@ def is_past_clock_out_cutoff(now_tw: datetime = None) -> bool:
 
 
 def is_within_clock_out_window(now_tw: datetime = None) -> bool:
-    """判斷目前是否在下班打卡允許時間內（台灣時間 17:00-18:30，含起迄）。"""
+    """判斷目前是否在下班打卡允許時間內（台灣時間 17:30-18:30，含起迄）。"""
     now_tw = now_tw or get_taiwan_now()
     return not is_before_clock_out_window(now_tw) and not is_past_clock_out_cutoff(now_tw)
 
@@ -923,7 +923,7 @@ def main():
         workdo.get_punch_status()
         
     elif args.action == 'out':
-        # 下班打卡：僅允許台灣時間 17:00-18:30
+        # 下班打卡：僅允許台灣時間 17:30-18:30
         now_tw = get_taiwan_now()
         if is_before_clock_out_window(now_tw):
             logger.info(
@@ -1031,8 +1031,8 @@ def main():
                 logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
             else:
                 punch_ok = workdo.clock_in()
-        # 下班打卡：17:00-18:30（含起迄）
-        elif 1700 <= current_time <= 1830:
+        # 下班打卡：17:30-18:30（含起迄）
+        elif 1730 <= current_time <= 1830:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
             if is_before_clock_out_window(now):
                 logger.info(
@@ -1052,7 +1052,7 @@ def main():
             else:
                 punch_ok = workdo.clock_out()
         else:
-            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-9:30, 下班: 17:00-18:30）")
+            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-9:30, 下班: 17:30-18:30）")
         
         workdo.get_punch_status()
     

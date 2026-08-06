@@ -23,13 +23,7 @@ on:
     - cron: '20 1 * * 1-5'    # 09:20 TW
     - cron: '25 1 * * 1-5'    # 09:25 TW
     - cron: '30 1 * * 1-5'    # 09:30 TW
-    # 下班打卡：台灣 17:00-18:30 每 5 分鐘觸發
-    - cron: '0 9 * * 1-5'     # 17:00 TW
-    - cron: '5 9 * * 1-5'     # 17:05 TW
-    - cron: '10 9 * * 1-5'    # 17:10 TW
-    - cron: '15 9 * * 1-5'    # 17:15 TW
-    - cron: '20 9 * * 1-5'    # 17:20 TW
-    - cron: '25 9 * * 1-5'    # 17:25 TW
+    # 下班打卡：台灣 17:30-18:30 每 5 分鐘觸發
     - cron: '30 9 * * 1-5'    # 17:30 TW
     - cron: '35 9 * * 1-5'    # 17:35 TW
     - cron: '40 9 * * 1-5'    # 17:40 TW
@@ -87,7 +81,7 @@ jobs:
           if [ "$TW_TIME" -ge 800 ] && [ "$TW_TIME" -le 930 ]; then
             echo "run_clock_in=true" >> $GITHUB_OUTPUT
             echo "run_clock_out=false" >> $GITHUB_OUTPUT
-          elif [ "$TW_TIME" -ge 1700 ] && [ "$TW_TIME" -le 1830 ]; then
+          elif [ "$TW_TIME" -ge 1730 ] && [ "$TW_TIME" -le 1830 ]; then
             echo "run_clock_in=false" >> $GITHUB_OUTPUT
             echo "run_clock_out=true" >> $GITHUB_OUTPUT
           else
