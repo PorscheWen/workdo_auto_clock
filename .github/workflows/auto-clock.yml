@@ -33,7 +33,7 @@ on:
     - cron: '0 10 * * 1-5'    # 18:00 TW
     - cron: '15 10 * * 1-5'   # 18:15 TW
     - cron: '30 10 * * 1-5'   # 18:30 TW
-  
+
   # 允許手動觸發
   workflow_dispatch:
     inputs:
@@ -59,124 +59,167 @@ env:
   LEAVE_DAYS_JSON: ${{ secrets.LEAVE_DAYS_JSON }}
 
 jobs:
-  auto-clock:
+  # 依台灣時間判斷排程應執行上班或下班（不受 cron 延遲影響）
+  setup:
     runs-on: ubuntu-latest
-    
+    if: github.event_name == 'schedule'
+    outputs:
+      run_clock_in: ${{ steps.check.outputs.run_clock_in }}
+      run_clock_out: ${{ steps.check.outputs.run_clock_out }}
+    steps:
+      - name: 判斷排程動作
+        id: check
+        run: |
+          TW_HOUR=$(TZ=Asia/Taipei date +%H)
+          TW_MIN=$(TZ=Asia/Taipei date +%M)
+          TW_TIME=$((10#$TW_HOUR * 100 + 10#$TW_MIN))
+          echo "排程觸發 (${{ github.event.schedule }})，台灣時間 ${TW_HOUR}:${TW_MIN}" >&2
+          if [ "$TW_TIME" -ge 730 ] && [ "$TW_TIME" -le 1030 ]; then
+            echo "run_clock_in=true" >> $GITHUB_OUTPUT
+            echo "run_clock_out=false" >> $GITHUB_OUTPUT
+          elif [ "$TW_TIME" -ge 1500 ] && [ "$TW_TIME" -le 1830 ]; then
+            echo "run_clock_in=false" >> $GITHUB_OUTPUT
+            echo "run_clock_out=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_clock_in=false" >> $GITHUB_OUTPUT
+            echo "run_clock_out=false" >> $GITHUB_OUTPUT
+          fi
+
+  clock-in:
+    needs: setup
+    if: |
+      always() && (
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'in') ||
+        (needs.setup.result == 'success' && needs.setup.outputs.run_clock_in == 'true')
+      )
+    runs-on: ubuntu-latest
+
     steps:
       - name: 檢出程式碼
         uses: actions/checkout@v5
-      
+
       - name: 設定 Python 環境
         uses: actions/setup-python@v6
         with:
           python-version: '3.9'
           cache: 'pip'
-      
+
       - name: 安裝依賴套件
-        run: |
-          pip install -r requirements.txt
-      
-      # 使用 $LEAVE_DAYS_JSON 寫檔，避免 echo '...' 在 JSON 含單引號時被 shell 截斷
+        run: pip install -r requirements.txt
+
       - name: 建立請假日設定檔
         if: env.LEAVE_DAYS_JSON != ''
-        run: |
-          printf '%s\n' "$LEAVE_DAYS_JSON" > leave_days.json
-      
+        run: printf '%s\n' "$LEAVE_DAYS_JSON" > leave_days.json
+
       - name: 驗證 LEAVE_DAYS_JSON 可解析
         if: env.LEAVE_DAYS_JSON != ''
-        run: |
-          python -c "import json; json.load(open('leave_days.json')); print('LEAVE_DAYS_JSON 格式正確')"
-      
+        run: python -c "import json; json.load(open('leave_days.json')); print('LEAVE_DAYS_JSON 格式正確')"
+
       - name: 合併台灣國定假日至 leave_days.json（與 Secret 並用）
         run: python workdo_auto_clock.py update-holidays-tw
 
       - name: 使用 Workdo 假期資料更新 leave_days.json（對齊 update-holidays.yml）
         if: env.WORKDO_USE_LEAVE_API == 'true'
         run: python workdo_auto_clock.py update-holidays
-      
-      - name: 驗證合併後 leave_days.json
-        run: |
-          test -f leave_days.json
-          python -c "import json; d=json.load(open('leave_days.json')); print('合併後共', len(d), '筆假日')"
-      
-      - name: 顯示 update-holidays-tw 合併結果
-        run: |
-          python << 'EOF'
-          import json
-          import os
-          with open("leave_days.json", encoding="utf-8") as f:
-              data = json.load(f)
-          sm = os.environ.get("GITHUB_STEP_SUMMARY")
-          if sm:
-              with open(sm, "a", encoding="utf-8") as s:
-                  s.write("## 🗓️ update-holidays-tw 合併結果\n\n")
-                  s.write(f"- 共 **{len(data)}** 筆（台灣行事曆 + `LEAVE_DAYS_JSON` Secret）\n\n")
-                  s.write("```json\n")
-                  s.write(json.dumps(data, ensure_ascii=False, indent=2))
-                  s.write("\n```\n")
-          print("===== leave_days.json（update-holidays-tw 後）=====")
-          print(json.dumps(data, ensure_ascii=False, indent=2))
-          EOF
-      
-      - name: 判斷執行動作
-        id: determine-action
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
-          else
-            # 排程觸發一律依「實際執行當下」的台灣時間判斷（不受 cron 延遲影響）
-            TW_HOUR=$(TZ=Asia/Taipei date +%H)
-            TW_MIN=$(TZ=Asia/Taipei date +%M)
-            TW_TIME=$((10#$TW_HOUR * 100 + 10#$TW_MIN))
-            echo "排程觸發 (${{ github.event.schedule }})，台灣時間 ${TW_HOUR}:${TW_MIN}" >&2
-            if [ "$TW_TIME" -ge 730 ] && [ "$TW_TIME" -le 1030 ]; then
-              echo "action=in" >> $GITHUB_OUTPUT
-            elif [ "$TW_TIME" -ge 1500 ] && [ "$TW_TIME" -le 1830 ]; then
-              echo "action=out" >> $GITHUB_OUTPUT
-            else
-              echo "action=auto" >> $GITHUB_OUTPUT
-            fi
-          fi
-      
-      - name: 執行打卡
-        run: |
-          python workdo_auto_clock.py ${{ steps.determine-action.outputs.action }}
-      
-      - name: 顯示本次 job 結束後 leave_days.json（含 Workdo update-holidays）
-        if: always()
-        run: |
-          python << 'EOF'
-          import json
-          import os
-          import sys
-          path = "leave_days.json"
-          sm = os.environ.get("GITHUB_STEP_SUMMARY")
-          if not os.path.isfile(path):
-              msg = "（無 leave_days.json，可能於合併步驟失敗）"
-              print(msg)
-              if sm:
-                  with open(sm, "a", encoding="utf-8") as s:
-                      s.write("\n## 📋 job 結束後假日檔\n\n")
-                      s.write(msg + "\n")
-              sys.exit(0)
-          with open(path, encoding="utf-8") as f:
-              data = json.load(f)
-          if sm:
-              with open(sm, "a", encoding="utf-8") as s:
-                  s.write("\n## 📋 job 結束後 leave_days.json\n\n")
-                  s.write("- 若動作為 **update-holidays**，此為 Workdo API 寫回後之內容。\n\n")
-                  s.write("```json\n")
-                  s.write(json.dumps(data, ensure_ascii=False, indent=2))
-                  s.write("\n```\n")
-          print("===== leave_days.json（job 結束後）=====")
-          print(json.dumps(data, ensure_ascii=False, indent=2))
-          EOF
-      
+
+      - name: 執行上班打卡
+        run: python workdo_auto_clock.py in
+
       - name: 上傳日誌
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: workdo-log-${{ github.run_number }}
-          path: |
-            *.log
+          name: workdo-log-clock-in-${{ github.run_number }}
+          path: '*.log'
+          retention-days: 7
+
+  clock-out:
+    needs: setup
+    if: |
+      always() && (
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'out') ||
+        (needs.setup.result == 'success' && needs.setup.outputs.run_clock_out == 'true')
+      )
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 檢出程式碼
+        uses: actions/checkout@v5
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: 安裝依賴套件
+        run: pip install -r requirements.txt
+
+      - name: 建立請假日設定檔
+        if: env.LEAVE_DAYS_JSON != ''
+        run: printf '%s\n' "$LEAVE_DAYS_JSON" > leave_days.json
+
+      - name: 驗證 LEAVE_DAYS_JSON 可解析
+        if: env.LEAVE_DAYS_JSON != ''
+        run: python -c "import json; json.load(open('leave_days.json')); print('LEAVE_DAYS_JSON 格式正確')"
+
+      - name: 合併台灣國定假日至 leave_days.json（與 Secret 並用）
+        run: python workdo_auto_clock.py update-holidays-tw
+
+      - name: 使用 Workdo 假期資料更新 leave_days.json（對齊 update-holidays.yml）
+        if: env.WORKDO_USE_LEAVE_API == 'true'
+        run: python workdo_auto_clock.py update-holidays
+
+      - name: 執行下班打卡
+        run: python workdo_auto_clock.py out
+
+      - name: 上傳日誌
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: workdo-log-clock-out-${{ github.run_number }}
+          path: '*.log'
+          retention-days: 7
+
+  other-actions:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'in' && github.event.inputs.action != 'out'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 檢出程式碼
+        uses: actions/checkout@v5
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: 安裝依賴套件
+        run: pip install -r requirements.txt
+
+      - name: 建立請假日設定檔
+        if: env.LEAVE_DAYS_JSON != ''
+        run: printf '%s\n' "$LEAVE_DAYS_JSON" > leave_days.json
+
+      - name: 驗證 LEAVE_DAYS_JSON 可解析
+        if: env.LEAVE_DAYS_JSON != ''
+        run: python -c "import json; json.load(open('leave_days.json')); print('LEAVE_DAYS_JSON 格式正確')"
+
+      - name: 合併台灣國定假日至 leave_days.json（與 Secret 並用）
+        run: python workdo_auto_clock.py update-holidays-tw
+
+      - name: 使用 Workdo 假期資料更新 leave_days.json（對齊 update-holidays.yml）
+        if: env.WORKDO_USE_LEAVE_API == 'true'
+        run: python workdo_auto_clock.py update-holidays
+
+      - name: 執行指定動作
+        run: python workdo_auto_clock.py ${{ github.event.inputs.action }}
+
+      - name: 上傳日誌
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: workdo-log-${{ github.event.inputs.action }}-${{ github.run_number }}
+          path: '*.log'
           retention-days: 7
