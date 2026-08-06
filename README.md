@@ -65,9 +65,9 @@ python workdo_auto_clock.py auto
 ```
 
 智慧模式會根據當前時間自動判斷：
-- **08:00-09:00**: 執行上班打卡
-- **17:00-18:30**: 執行下班打卡
-- **超過 18:30 時自動放棄下班打卡**（防護機制：避免執行延遲導致實際打卡時間過晚）
+- **08:00-09:30**: 執行上班打卡
+- **17:30-18:30**: 執行下班打卡
+- **超過 09:30 / 18:30 時自動放棄對應打卡**（防護機制：避免實際打卡時間過晚）
 - 自動檢查並補缺卡
 - 自動跳過週末和假日
 
@@ -140,9 +140,27 @@ python workdo_auto_clock.py update-holidays
 ### 2. 排程說明
 
 #### 自動打卡排程（`.github/workflows/auto-clock.yml`）
-- **上班打卡**: 每週一至週五 **08:00**（台灣時間），每日 **1** 次（不因重試而連續觸發）
-- **下班打卡**: 每週一至週五 **17:00**（台灣時間），每日 **1** 次
-- **下班打卡截止防護**: 若實際執行時 **台灣時間已超過 17:45**，會直接放棄本次下班打卡（避免延遲過大導致打到太晚的時間）
+- **上班打卡**: 台灣 **08:00-09:30** 期間，**每 5 分鐘**觸發一次
+- **下班打卡**: 台灣 **17:30-18:30** 期間，**每 5 分鐘**觸發一次
+- **已打卡自動停止**: 成功打卡後，後續觸發會於 precheck 階段略過（不重複打卡）
+- **排程判斷**: 依實際執行當下的台灣時間決定 `in` / `out`（不受 Actions 延遲影響）
+- **截止防護**: 超過允許時間會放棄打卡並標記 workflow 失敗
+
+> GitHub Actions 排程不保證準時，密集觸發可提高延遲後仍能在窗口內打卡的機率。若需更準時，可改用外部 cron 觸發 `workflow_dispatch`（見下方）。
+
+#### 外部定時觸發（進階，可選）
+
+若需要更準時，可用 [cron-job.org](https://cron-job.org) 等服務，在指定時間呼叫 GitHub API：
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <GITHUB_TOKEN>" \
+  -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/<OWNER>/<REPO>/actions/workflows/auto-clock.yml/dispatches \
+  -d '{"ref":"main","inputs":{"action":"in"}}'
+```
+
+Token 需具備 `workflow` 權限。下班打卡將 `action` 改為 `out`。
 
 #### 自動更新假日資料（`.github/workflows/update-holidays.yml`）✨ **新增**
 - **執行時間**: 每週一 08:00（台灣時間）
