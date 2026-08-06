@@ -59,6 +59,14 @@ def get_elapsed_time() -> float:
     return time.time() - PROGRAM_START_TIME
 
 
+def write_github_output(key: str, value: str):
+    """寫入 GitHub Actions step output（若於 CI 環境中）。"""
+    path = os.environ.get('GITHUB_OUTPUT')
+    if path:
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(f'{key}={value}\n')
+
+
 def log_time_diagnostic():
     """記錄時間診斷信息（用於排查 GitHub Actions 延遲）"""
     elapsed = get_elapsed_time()
@@ -780,8 +788,8 @@ def main():
     parser = argparse.ArgumentParser(description='Workdo 自動打卡系統')
     parser.add_argument(
         'action',
-        choices=['in', 'out', 'status', 'check-missing', 'auto', 'update-holidays', 'update-holidays-tw'],
-        help='執行動作: in(上班打卡), out(下班打卡), status(查詢狀態), check-missing(檢查並補缺卡), auto(智慧判斷), update-holidays(從Workdo更新假日), update-holidays-tw(從台灣政府公開資料更新假日)'
+        choices=['in', 'out', 'status', 'check-missing', 'auto', 'update-holidays', 'update-holidays-tw', 'precheck-in', 'precheck-out'],
+        help='執行動作: in(上班打卡), out(下班打卡), status(查詢狀態), check-missing(檢查並補缺卡), auto(智慧判斷), precheck-in/out(檢查是否仍需打卡), update-holidays(從Workdo更新假日), update-holidays-tw(從台灣政府公開資料更新假日)'
     )
     parser.add_argument(
         '--skip-holiday-check',
@@ -862,6 +870,23 @@ def main():
     if not workdo.login():
         logger.error("❌ 登入失敗，程式結束")
         sys.exit(1)
+
+    if args.action in ('precheck-in', 'precheck-out'):
+        punch_type = 'ClockIn' if args.action == 'precheck-in' else 'ClockOut'
+        punch_name = '上班' if punch_type == 'ClockIn' else '下班'
+        if not args.skip_holiday_check and workdo.is_holiday():
+            logger.info("🎉 今天是假日，不需要打卡")
+            write_github_output('skip', 'true')
+            write_github_output('skip_reason', 'holiday')
+            sys.exit(0)
+        if workdo.has_punched_type_today(punch_type):
+            logger.info(f"✅ 今日已完成{punch_name}打卡，停止後續執行")
+            write_github_output('skip', 'true')
+            write_github_output('skip_reason', 'already_punched')
+            sys.exit(0)
+        logger.info(f"📌 今日尚未{punch_name}打卡，繼續執行")
+        write_github_output('skip', 'false')
+        sys.exit(0)
     
     # 檢查是否為假日（自動打卡模式時跳過假日）
     if args.action in ['in', 'out', 'auto'] and not args.skip_holiday_check:

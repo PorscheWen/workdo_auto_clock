@@ -3,21 +3,45 @@ name: Workdo 自動打卡
 on:
   # 定時執行（使用 UTC 時間）
   schedule:
-    # 上班打卡：台灣 08:00-09:30 每 15 分鐘觸發
+    # 上班打卡：台灣 08:00-09:30 每 5 分鐘觸發
     - cron: '0 0 * * 1-5'     # 08:00 TW
+    - cron: '5 0 * * 1-5'     # 08:05 TW
+    - cron: '10 0 * * 1-5'    # 08:10 TW
     - cron: '15 0 * * 1-5'    # 08:15 TW
+    - cron: '20 0 * * 1-5'    # 08:20 TW
+    - cron: '25 0 * * 1-5'    # 08:25 TW
     - cron: '30 0 * * 1-5'    # 08:30 TW
+    - cron: '35 0 * * 1-5'    # 08:35 TW
+    - cron: '40 0 * * 1-5'    # 08:40 TW
     - cron: '45 0 * * 1-5'    # 08:45 TW
+    - cron: '50 0 * * 1-5'    # 08:50 TW
+    - cron: '55 0 * * 1-5'    # 08:55 TW
     - cron: '0 1 * * 1-5'     # 09:00 TW
+    - cron: '5 1 * * 1-5'     # 09:05 TW
+    - cron: '10 1 * * 1-5'    # 09:10 TW
     - cron: '15 1 * * 1-5'    # 09:15 TW
+    - cron: '20 1 * * 1-5'    # 09:20 TW
+    - cron: '25 1 * * 1-5'    # 09:25 TW
     - cron: '30 1 * * 1-5'    # 09:30 TW
-    # 下班打卡：台灣 17:00-18:30 每 15 分鐘觸發
+    # 下班打卡：台灣 17:00-18:30 每 5 分鐘觸發
     - cron: '0 9 * * 1-5'     # 17:00 TW
+    - cron: '5 9 * * 1-5'     # 17:05 TW
+    - cron: '10 9 * * 1-5'    # 17:10 TW
     - cron: '15 9 * * 1-5'    # 17:15 TW
+    - cron: '20 9 * * 1-5'    # 17:20 TW
+    - cron: '25 9 * * 1-5'    # 17:25 TW
     - cron: '30 9 * * 1-5'    # 17:30 TW
+    - cron: '35 9 * * 1-5'    # 17:35 TW
+    - cron: '40 9 * * 1-5'    # 17:40 TW
     - cron: '45 9 * * 1-5'    # 17:45 TW
+    - cron: '50 9 * * 1-5'    # 17:50 TW
+    - cron: '55 9 * * 1-5'    # 17:55 TW
     - cron: '0 10 * * 1-5'    # 18:00 TW
+    - cron: '5 10 * * 1-5'    # 18:05 TW
+    - cron: '10 10 * * 1-5'   # 18:10 TW
     - cron: '15 10 * * 1-5'   # 18:15 TW
+    - cron: '20 10 * * 1-5'   # 18:20 TW
+    - cron: '25 10 * * 1-5'   # 18:25 TW
     - cron: '30 10 * * 1-5'   # 18:30 TW
 
   # 允許手動觸發
@@ -60,10 +84,10 @@ jobs:
           TW_MIN=$(TZ=Asia/Taipei date +%M)
           TW_TIME=$((10#$TW_HOUR * 100 + 10#$TW_MIN))
           echo "排程觸發 (${{ github.event.schedule }})，台灣時間 ${TW_HOUR}:${TW_MIN}" >&2
-          if [ "$TW_TIME" -ge 730 ] && [ "$TW_TIME" -le 1030 ]; then
+          if [ "$TW_TIME" -ge 800 ] && [ "$TW_TIME" -le 930 ]; then
             echo "run_clock_in=true" >> $GITHUB_OUTPUT
             echo "run_clock_out=false" >> $GITHUB_OUTPUT
-          elif [ "$TW_TIME" -ge 1500 ] && [ "$TW_TIME" -le 1830 ]; then
+          elif [ "$TW_TIME" -ge 1700 ] && [ "$TW_TIME" -le 1830 ]; then
             echo "run_clock_in=false" >> $GITHUB_OUTPUT
             echo "run_clock_out=true" >> $GITHUB_OUTPUT
           else
@@ -97,18 +121,24 @@ jobs:
         if: env.LEAVE_DAYS_JSON != ''
         run: printf '%s\n' "$LEAVE_DAYS_JSON" > leave_days.json
 
+      - name: 檢查是否仍需上班打卡
+        id: precheck
+        run: python workdo_auto_clock.py precheck-in
+
       - name: 驗證 LEAVE_DAYS_JSON 可解析
-        if: env.LEAVE_DAYS_JSON != ''
+        if: env.LEAVE_DAYS_JSON != '' && steps.precheck.outputs.skip != 'true'
         run: python -c "import json; json.load(open('leave_days.json')); print('LEAVE_DAYS_JSON 格式正確')"
 
       - name: 合併台灣國定假日至 leave_days.json（與 Secret 並用）
+        if: steps.precheck.outputs.skip != 'true'
         run: python workdo_auto_clock.py update-holidays-tw
 
       - name: 使用 Workdo 假期資料更新 leave_days.json（對齊 update-holidays.yml）
-        if: env.WORKDO_USE_LEAVE_API == 'true'
+        if: env.WORKDO_USE_LEAVE_API == 'true' && steps.precheck.outputs.skip != 'true'
         run: python workdo_auto_clock.py update-holidays
 
       - name: 執行上班打卡
+        if: steps.precheck.outputs.skip != 'true'
         run: python workdo_auto_clock.py in
 
       - name: 上傳日誌
@@ -145,18 +175,24 @@ jobs:
         if: env.LEAVE_DAYS_JSON != ''
         run: printf '%s\n' "$LEAVE_DAYS_JSON" > leave_days.json
 
+      - name: 檢查是否仍需下班打卡
+        id: precheck
+        run: python workdo_auto_clock.py precheck-out
+
       - name: 驗證 LEAVE_DAYS_JSON 可解析
-        if: env.LEAVE_DAYS_JSON != ''
+        if: env.LEAVE_DAYS_JSON != '' && steps.precheck.outputs.skip != 'true'
         run: python -c "import json; json.load(open('leave_days.json')); print('LEAVE_DAYS_JSON 格式正確')"
 
       - name: 合併台灣國定假日至 leave_days.json（與 Secret 並用）
+        if: steps.precheck.outputs.skip != 'true'
         run: python workdo_auto_clock.py update-holidays-tw
 
       - name: 使用 Workdo 假期資料更新 leave_days.json（對齊 update-holidays.yml）
-        if: env.WORKDO_USE_LEAVE_API == 'true'
+        if: env.WORKDO_USE_LEAVE_API == 'true' && steps.precheck.outputs.skip != 'true'
         run: python workdo_auto_clock.py update-holidays
 
       - name: 執行下班打卡
+        if: steps.precheck.outputs.skip != 'true'
         run: python workdo_auto_clock.py out
 
       - name: 上傳日誌
