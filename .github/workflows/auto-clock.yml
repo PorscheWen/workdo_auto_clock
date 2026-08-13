@@ -5,8 +5,8 @@ on:
   schedule:
     # 上班打卡：每週日至週四 UTC 23:30（台灣時間週一至週五 07:30），每日僅觸發一次
     - cron: '30 23 * * 0-4'
-    # 下班打卡：每週一至週五 UTC 08:30（台灣時間 16:30），每日僅觸發一次
-    - cron: '30 8 * * 1-5'
+    # 下班打卡：每週一至週五 UTC 10:30（台灣時間 18:30），每日僅觸發一次
+    - cron: '30 10 * * 1-5'
   
   # 允許手動觸發
   workflow_dispatch:
@@ -107,10 +107,10 @@ jobs:
             *.log
           retention-days: 7
   
-  # 下班打卡 Job（僅在 08:30 UTC 排程時執行）
+  # 下班打卡 Job（僅在 10:30 UTC 排程時執行）
   clock-out:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '30 8 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'out')
+    if: github.event.schedule == '30 10 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'out')
     
     steps:
       - name: 檢出程式碼
