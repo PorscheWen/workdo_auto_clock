@@ -40,8 +40,9 @@ TAIWAN_TZ = timezone(timedelta(hours=8))
 CLOCK_OUT_CUTOFF_HOUR = 18
 CLOCK_OUT_CUTOFF_MINUTE = 45
 
-# 下班打卡「安全執行截止時間」：比實際截止時間提前 3 分鐘，確保 API 延遲不會導致打卡時間超過截止
-CLOCK_OUT_SAFE_CUTOFF_MINUTE = CLOCK_OUT_CUTOFF_MINUTE - 3  # 18:42 開始不再發送打卡請求
+# 下班打卡「安全執行截止時間」（台灣時間）：超過此時間不再發送打卡請求
+CLOCK_OUT_SAFE_CUTOFF_HOUR = 18
+CLOCK_OUT_SAFE_CUTOFF_MINUTE = 30
 
 
 def get_taiwan_now() -> datetime:
@@ -84,11 +85,10 @@ def is_past_clock_out_cutoff(now_tw: datetime = None) -> bool:
 
 
 def is_past_clock_out_safe_cutoff(now_tw: datetime = None) -> bool:
-    """判斷目前是否已過下班打卡「安全執行截止時間」（台灣時間 18:42）。
-    此時間比實際截止時間提前 3 分鐘，確保即使 API 有延遲，打卡時間仍在 18:45 內。"""
+    """判斷目前是否已過下班打卡「安全執行截止時間」（台灣時間 18:30）。"""
     now_tw = now_tw or get_taiwan_now()
     safe_cutoff = now_tw.replace(
-        hour=CLOCK_OUT_CUTOFF_HOUR,
+        hour=CLOCK_OUT_SAFE_CUTOFF_HOUR,
         minute=CLOCK_OUT_SAFE_CUTOFF_MINUTE,
         second=0,
         microsecond=0,
@@ -857,7 +857,7 @@ def main():
         if is_past_clock_out_safe_cutoff(now_tw):
             logger.warning(
                 f"⛔ 目前台灣時間 {now_tw.strftime('%H:%M:%S')} "
-                f"已超過下班打卡安全截止時間 {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_SAFE_CUTOFF_MINUTE:02d}"
+                f"已超過下班打卡安全截止時間 {CLOCK_OUT_SAFE_CUTOFF_HOUR:02d}:{CLOCK_OUT_SAFE_CUTOFF_MINUTE:02d}"
                 f"（實際截止: {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}），"
                 f"放棄本次下班打卡，防止打卡時間超過截止時間。"
             )
@@ -947,7 +947,7 @@ def main():
             if is_past_clock_out_safe_cutoff(now):
                 logger.warning(
                     f"⛔ 目前台灣時間 {now.strftime('%H:%M:%S')} "
-                    f"已超過下班打卡安全截止時間 {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_SAFE_CUTOFF_MINUTE:02d}"
+                    f"已超過下班打卡安全截止時間 {CLOCK_OUT_SAFE_CUTOFF_HOUR:02d}:{CLOCK_OUT_SAFE_CUTOFF_MINUTE:02d}"
                     f"（實際截止: {CLOCK_OUT_CUTOFF_HOUR:02d}:{CLOCK_OUT_CUTOFF_MINUTE:02d}），"
                     f"放棄本次下班打卡（防止打卡時間超過截止時間）。"
                 )
