@@ -37,11 +37,11 @@ TAIWAN_CALENDAR_DATA_URL = "https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/dat
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
 # 下班打卡截止時間（台灣時間）：超過此時間放棄當次下班打卡，避免打到太晚的時間
-CLOCK_OUT_CUTOFF_HOUR = 17
+CLOCK_OUT_CUTOFF_HOUR = 18
 CLOCK_OUT_CUTOFF_MINUTE = 45
 
 # 下班打卡「安全執行截止時間」：比實際截止時間提前 3 分鐘，確保 API 延遲不會導致打卡時間超過截止
-CLOCK_OUT_SAFE_CUTOFF_MINUTE = CLOCK_OUT_CUTOFF_MINUTE - 3  # 17:42 開始不再發送打卡請求
+CLOCK_OUT_SAFE_CUTOFF_MINUTE = CLOCK_OUT_CUTOFF_MINUTE - 3  # 18:42 開始不再發送打卡請求
 
 
 def get_taiwan_now() -> datetime:
@@ -72,7 +72,7 @@ def log_time_diagnostic():
 
 
 def is_past_clock_out_cutoff(now_tw: datetime = None) -> bool:
-    """判斷目前是否已過下班打卡截止時間（台灣時間 17:45）。"""
+    """判斷目前是否已過下班打卡截止時間（台灣時間 18:45）。"""
     now_tw = now_tw or get_taiwan_now()
     cutoff = now_tw.replace(
         hour=CLOCK_OUT_CUTOFF_HOUR,
@@ -84,8 +84,8 @@ def is_past_clock_out_cutoff(now_tw: datetime = None) -> bool:
 
 
 def is_past_clock_out_safe_cutoff(now_tw: datetime = None) -> bool:
-    """判斷目前是否已過下班打卡「安全執行截止時間」（台灣時間 17:42）。
-    此時間比實際截止時間提前 3 分鐘，確保即使 API 有延遲，打卡時間仍在 17:45 內。"""
+    """判斷目前是否已過下班打卡「安全執行截止時間」（台灣時間 18:42）。
+    此時間比實際截止時間提前 3 分鐘，確保即使 API 有延遲，打卡時間仍在 18:45 內。"""
     now_tw = now_tw or get_taiwan_now()
     safe_cutoff = now_tw.replace(
         hour=CLOCK_OUT_CUTOFF_HOUR,
@@ -306,7 +306,7 @@ class WorkdoAPI:
                 logger.warning(f"⚠️ 無法解析打卡時間格式: {punch_time_str}，跳過驗證")
                 return True  # 無法解析時仍視為成功，避免影響正常流程
             
-            # 建立截止時間（今天 17:45）
+            # 建立截止時間（今天 18:45）
             cutoff_time = datetime.now().replace(
                 hour=CLOCK_OUT_CUTOFF_HOUR,
                 minute=CLOCK_OUT_CUTOFF_MINUTE,
@@ -940,8 +940,8 @@ def main():
                 logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
             else:
                 workdo.clock_in()
-        # 下班打卡：17:00-17:30（含 17:30），對齊「排程 17:00、截止 17:45」之防護機制
-        elif 1700 <= current_time <= 1730:
+        # 下班打卡：18:00-18:30（含 18:30），對齊「排程 18:30、截止 18:45」之防護機制
+        elif 1800 <= current_time <= 1830:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
             # 檢查是否超過安全截止時間
             if is_past_clock_out_safe_cutoff(now):
@@ -956,7 +956,7 @@ def main():
             else:
                 workdo.clock_out()
         else:
-            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-8:30, 下班: 17:00-17:30）")
+            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-8:30, 下班: 18:00-18:30）")
         
         workdo.get_punch_status()
     
