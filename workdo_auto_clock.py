@@ -990,8 +990,8 @@ def main():
                 logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
             else:
                 workdo.clock_in()
-        # 下班打卡：17:30-18:30（含 18:30），對齊「排程 17:30、截止 18:30」之防護機制
-        elif 1730 <= current_time <= 1830:
+        # 下班打卡：18:00-18:30（含 18:30），對齊「排程 18:00、截止 18:30」之防護機制
+        elif 1800 <= current_time <= 1830:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
             # 檢查是否超過安全截止時間
             if is_past_clock_out_safe_cutoff(now):
@@ -1006,7 +1006,7 @@ def main():
             else:
                 workdo.clock_out()
         else:
-            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-9:00, 下班: 17:30-18:30）")
+            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-9:00, 下班: 18:00-18:30）")
         
         workdo.get_punch_status()
     
