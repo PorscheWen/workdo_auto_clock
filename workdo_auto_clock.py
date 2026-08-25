@@ -44,6 +44,10 @@ CLOCK_IN_CUTOFF_MINUTE = 0
 CLOCK_IN_SAFE_CUTOFF_HOUR = 8
 CLOCK_IN_SAFE_CUTOFF_MINUTE = 57  # 08:57 開始不再發送打卡請求
 
+# 下班打卡開始時間（台灣時間）：18:00 前不執行下班打卡
+CLOCK_OUT_START_HOUR = 18
+CLOCK_OUT_START_MINUTE = 0
+
 # 下班打卡截止時間（台灣時間）：超過 18:30 放棄當次下班打卡
 CLOCK_OUT_CUTOFF_HOUR = 18
 CLOCK_OUT_CUTOFF_MINUTE = 30
@@ -102,6 +106,18 @@ def is_past_clock_in_safe_cutoff(now_tw: datetime = None) -> bool:
         microsecond=0,
     )
     return now_tw > safe_cutoff
+
+
+def is_before_clock_out_start(now_tw: datetime = None) -> bool:
+    """判斷目前是否尚未到下班打卡開始時間（台灣時間 18:00）。"""
+    now_tw = now_tw or get_taiwan_now()
+    start = now_tw.replace(
+        hour=CLOCK_OUT_START_HOUR,
+        minute=CLOCK_OUT_START_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    return now_tw < start
 
 
 def is_past_clock_out_cutoff(now_tw: datetime = None) -> bool:
@@ -897,6 +913,14 @@ def main():
     elif args.action == 'out':
         # 下班打卡
         now_tw = get_taiwan_now()
+        if is_before_clock_out_start(now_tw):
+            logger.warning(
+                f"⛔ 目前台灣時間 {now_tw.strftime('%H:%M:%S')} "
+                f"尚未到下班打卡開始時間 {CLOCK_OUT_START_HOUR:02d}:{CLOCK_OUT_START_MINUTE:02d}，"
+                f"放棄本次下班打卡。"
+            )
+            workdo.get_punch_status()
+            sys.exit(0)
         if is_past_clock_out_safe_cutoff(now_tw):
             logger.warning(
                 f"⛔ 目前台灣時間 {now_tw.strftime('%H:%M:%S')} "
@@ -966,7 +990,7 @@ def main():
         now = get_taiwan_now()
         current_hour = now.hour
         current_minute = now.minute
-        current_time = current_hour * 100 + current_minute  # 例如 8:30 = 830, 17:30 = 1730
+        current_time = current_hour * 100 + current_minute  # 例如 8:30 = 830, 18:00 = 1800
         
         # 先檢查並補缺卡
         missing_records = workdo.query_missing_punch()
@@ -990,8 +1014,8 @@ def main():
                 logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
             else:
                 workdo.clock_in()
-        # 下班打卡：17:30-18:30（含 18:30），對齊「排程 17:30、截止 18:30」之防護機制
-        elif 1730 <= current_time <= 1830:
+        # 下班打卡：18:00-18:30（含 18:30），對齊「排程 18:00、截止 18:30」之防護機制
+        elif 1800 <= current_time <= 1830:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
             # 檢查是否超過安全截止時間
             if is_past_clock_out_safe_cutoff(now):
@@ -1006,7 +1030,7 @@ def main():
             else:
                 workdo.clock_out()
         else:
-            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-9:00, 下班: 17:30-18:30）")
+            logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-9:00, 下班: 18:00-18:30）")
         
         workdo.get_punch_status()
     
