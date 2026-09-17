@@ -1,0 +1,112 @@
+name: Deploy Workdo to Cloud Run Job
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workdo_auto_clock.py'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-cloudrun.yml'
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: stock-ai-agent-prod
+  REGION: asia-east1
+  REPO: workdo
+  IMAGE: workdo-auto-clock
+  JOB_NAME: workdo-auto-clock
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Ensure Artifact Registry repo
+        run: |
+          gcloud artifacts repositories describe "$REPO" \
+            --location="$REGION" \
+            --project="$PROJECT_ID" \
+          || gcloud artifacts repositories create "$REPO" \
+            --repository-format=docker \
+            --location="$REGION" \
+            --project="$PROJECT_ID" \
+            --description="Workdo auto clock images"
+
+      - name: Build and push image
+        run: |
+          gcloud builds submit . \
+            --tag="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:latest" \
+            --project="$PROJECT_ID"
+
+      - name: Write env vars file
+        env:
+          WORKDO_EMAIL: ${{ secrets.WORKDO_EMAIL }}
+          WORKDO_PASSWORD: ${{ secrets.WORKDO_PASSWORD }}
+          WORKDO_GPS_LOCATION: ${{ secrets.WORKDO_GPS_LOCATION }}
+          WORKDO_GPS_PLACE: ${{ secrets.WORKDO_GPS_PLACE }}
+          WORKDO_USE_LEAVE_API: ${{ secrets.WORKDO_USE_LEAVE_API }}
+          LEAVE_DAYS_JSON: ${{ secrets.LEAVE_DAYS_JSON }}
+        run: |
+          python3 << 'PY'
+          import os
+
+          def q(value: str) -> str:
+              return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+          rows = {
+              "WORKDO_EMAIL": os.environ.get("WORKDO_EMAIL", ""),
+              "WORKDO_PASSWORD": os.environ.get("WORKDO_PASSWORD", ""),
+              "WORKDO_GPS_LOCATION": os.environ.get("WORKDO_GPS_LOCATION") or "25.033,121.564",
+              "WORKDO_GPS_PLACE": os.environ.get("WORKDO_GPS_PLACE") or "台北市信義區",
+              "WORKDO_USE_LEAVE_API": os.environ.get("WORKDO_USE_LEAVE_API") or "false",
+              "WORKDO_USE_TW_CALENDAR": "true",
+              "CI": "true",
+          }
+          leave = (os.environ.get("LEAVE_DAYS_JSON") or "").strip()
+          if leave:
+              rows["LEAVE_DAYS_JSON"] = leave
+
+          with open("/tmp/workdo-env.yaml", "w", encoding="utf-8") as f:
+              for key, value in rows.items():
+                  f.write(f"{key}: {q(value)}\n")
+          print("env file keys:", ", ".join(sorted(rows.keys())))
+          PY
+
+      - name: Deploy Cloud Run Job
+        run: |
+          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:latest"
+          if gcloud run jobs describe "$JOB_NAME" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud run jobs update "$JOB_NAME" \
+              --image="$IMAGE_URI" \
+              --region="$REGION" \
+              --project="$PROJECT_ID" \
+              --memory=512Mi \
+              --cpu=1 \
+              --task-timeout=10m \
+              --max-retries=1 \
+              --env-vars-file=/tmp/workdo-env.yaml
+          else
+            gcloud run jobs create "$JOB_NAME" \
+              --image="$IMAGE_URI" \
+              --region="$REGION" \
+              --project="$PROJECT_ID" \
+              --memory=512Mi \
+              --cpu=1 \
+              --task-timeout=10m \
+              --max-retries=1 \
+              --env-vars-file=/tmp/workdo-env.yaml
+          fi

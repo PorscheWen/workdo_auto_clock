@@ -1,0 +1,15 @@
+.git
+.github
+.env
+*.log
+__pycache__
+*.pyc
+.venv
+venv
+check_clock
+DELAY_ANALYSIS.md
+install.sh
+README.md
+leave_days.json
+.idea
+.vscode

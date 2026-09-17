@@ -794,6 +794,17 @@ def main():
     """主程式"""
     # 載入環境變數
     load_dotenv()
+
+    # Cloud Run / CI：若有 LEAVE_DAYS_JSON 環境變數，寫成 leave_days.json
+    leave_days_json = (os.getenv('LEAVE_DAYS_JSON') or '').strip()
+    if leave_days_json and not os.path.exists('leave_days.json'):
+        try:
+            parsed = json.loads(leave_days_json)
+            with open('leave_days.json', 'w', encoding='utf-8') as f:
+                json.dump(parsed, f, ensure_ascii=False, indent=2)
+            logger.info(f"✅ 已從 LEAVE_DAYS_JSON 寫入 leave_days.json（{len(parsed)} 筆）")
+        except Exception as e:
+            logger.warning(f"⚠️ 無法解析 LEAVE_DAYS_JSON: {e}")
     
     # 記錄時間診斷信息
     log_time_diagnostic()
