@@ -1,14 +1,8 @@
 name: Workdo 自動打卡
 
 on:
-  # 定時執行（使用 UTC 時間）
-  schedule:
-    # 上班打卡：每週日至週四 UTC 00:00（台灣時間週一至週五 08:00），每日僅觸發一次
-    - cron: '0 0 * * 0-4'
-    # 下班打卡：每週一至週五 UTC 10:00（台灣時間 18:00），每日僅觸發一次
-    - cron: '0 10 * * 1-5'
-  
-  # 允許手動觸發
+  # 排程已改由 Google Cloud Scheduler + Cloud Run Job 執行（較準時）
+  # 此 workflow 僅保留手動觸發作備援／測試
   workflow_dispatch:
     inputs:
       action:
@@ -33,10 +27,10 @@ env:
   LEAVE_DAYS_JSON: ${{ secrets.LEAVE_DAYS_JSON }}
 
 jobs:
-  # 上班打卡 Job（僅在 00:00 UTC 排程時執行）
+  # 上班打卡 Job（僅手動 action=in）
   clock-in:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 0 * * 0-4' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'in')
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'in'
     
     steps:
       - name: 檢出程式碼
@@ -107,10 +101,10 @@ jobs:
             *.log
           retention-days: 7
   
-  # 下班打卡 Job（僅在 10:00 UTC 排程時執行）
+  # 下班打卡 Job（僅手動 action=out）
   clock-out:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 10 * * 1-5' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'out')
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'out'
     
     steps:
       - name: 檢出程式碼
