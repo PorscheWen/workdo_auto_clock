@@ -140,11 +140,32 @@ python workdo_auto_clock.py update-holidays
 
 ### 2. 排程說明
 
-#### 自動打卡排程（`.github/workflows/auto-clock.yml`）
-- **上班打卡**: 每週一至週五 **08:00**（台灣時間），每日 **1** 次（允許區間至 09:00）
-- **上班打卡截止防護**: 若實際執行時 **台灣時間已超過 09:00**，會直接放棄本次上班打卡
-- **下班打卡**: 每週一至週五 **18:00**（台灣時間），每日 **1** 次（允許區間 18:00–18:30）
-- **下班打卡截止防護**: 若實際執行時 **台灣時間已超過 18:30**，會直接放棄本次下班打卡（避免延遲過大導致打到太晚的時間）
+#### 正式自動打卡（Google Cloud Run Job + Cloud Scheduler）⭐ **推薦**
+
+推送到 `main` 後，[`.github/workflows/deploy-cloudrun.yml`](.github/workflows/deploy-cloudrun.yml) 會建置 Docker 映像並部署 **Cloud Run Job**（`workdo-auto-clock`）。實際定時執行由 **Google Cloud Scheduler** 觸發 Job，並以容器參數指定動作（`in` / `out`），比 GitHub Actions cron 更準時。
+
+| 項目 | 建議設定 |
+|------|----------|
+| Scheduler 時區 | `Asia/Taipei` |
+| 上班打卡 | cron `0 8 * * 1-5`，Job 參數 `in` |
+| 下班打卡 | cron `0 18 * * 1-5`，Job 參數 `out` |
+
+程式內建時間防護（皆為台灣時間，與下方一致）：
+
+- **上班**：08:00 前不打卡；08:57 後不再送出上班打卡請求（避免 API 延遲導致超過 09:00）
+- **下班**：18:00 前不打卡；18:27 後不再送出下班打卡請求（避免超過 18:30）
+
+Cloud Run Job 設為 `--max-retries=1`：若打卡失敗（程式以 exit code 1 結束）會再重試一次。重試前會先查詢今日是否已打卡（`has_punched_type_today`），已成功則略過，避免重複打卡。
+
+容器映像於 [`Dockerfile`](Dockerfile) 設定 `TZ=Asia/Taipei`；假日與日期判斷亦使用程式內 `get_taiwan_now()`，在 UTC 環境仍正確。
+
+> **注意**：若 Scheduler 使用 **UTC** 時區，舊式 cron `0 0 * * 0-4` 對應的是台灣時間 **週日～週四 08:00**，並非週一至週五。請務必將 Scheduler 時區設為 `Asia/Taipei`，或使用上表 cron。
+
+Scheduler 的具體資源名稱與 IAM 僅在 GCP 主控台設定，本 repo 不包含 Scheduler 設定檔。
+
+#### GitHub Actions 手動備援（`.github/workflows/auto-clock.yml`）
+
+[`auto-clock.yml`](.github/workflows/auto-clock.yml) **已移除排程 cron**，僅保留 **workflow_dispatch** 手動觸發，供測試或緊急補打卡。時間防護邏輯與 Cloud Run 相同。
 
 #### 自動更新假日資料（`.github/workflows/update-holidays.yml`）✨ **新增**
 - **執行時間**: 每週一 08:00（台灣時間）
@@ -218,7 +239,7 @@ WORKDO_GPS_PLACE=台北市信義區信義路五段7號
 
 1. **環境變數安全**: 不要將 `.env` 檔案上傳到版本控制系統
 2. **GitHub Secrets**: 使用 GitHub Actions 時，務必使用 Secrets 存放敏感資訊
-3. **時區設定**: GitHub Actions 使用 UTC 時間，需要減 8 小時
+3. **時區設定**: Cloud Run 容器使用 `Asia/Taipei`；若仍用 GitHub Actions 手動執行，runner 為 UTC，程式以 `get_taiwan_now()` 判斷台灣時間
 4. **執行頻率**: 免費 GitHub Actions 每月有 2000 分鐘額度，本系統每天約使用 1 分鐘
 5. **網路穩定**: 確保執行環境能穩定連接到 Workdo 服務
 6. **假日處理**: 系統會自動跳過週末，國定假日請使用 `leave_days.json` 設定
