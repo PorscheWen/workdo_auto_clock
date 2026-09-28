@@ -36,6 +36,10 @@ TAIWAN_CALENDAR_DATA_URL = "https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/dat
 # 台灣時區（UTC+8），用於在 GitHub Actions（UTC）環境中也能正確判斷台灣本地時間
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
+# 上班打卡開始時間（台灣時間）：08:00 前不執行上班打卡
+CLOCK_IN_START_HOUR = 8
+CLOCK_IN_START_MINUTE = 0
+
 # 上班打卡截止時間（台灣時間）：超過 09:00 放棄當次上班打卡
 CLOCK_IN_CUTOFF_HOUR = 9
 CLOCK_IN_CUTOFF_MINUTE = 0
@@ -81,6 +85,18 @@ def log_time_diagnostic():
     logger.info(f"目前時間 (台灣):     {now_tw.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     logger.info(f"程式已執行:         {elapsed:.2f} 秒")
     logger.info("=" * 60)
+
+
+def is_before_clock_in_start(now_tw: datetime = None) -> bool:
+    """判斷目前是否尚未到上班打卡開始時間（台灣時間 08:00）。"""
+    now_tw = now_tw or get_taiwan_now()
+    start = now_tw.replace(
+        hour=CLOCK_IN_START_HOUR,
+        minute=CLOCK_IN_START_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    return now_tw < start
 
 
 def is_past_clock_in_cutoff(now_tw: datetime = None) -> bool:
@@ -355,14 +371,16 @@ class WorkdoAPI:
                 logger.warning(f"⚠️ 無法解析打卡時間格式: {punch_time_str}，跳過驗證")
                 return True  # 無法解析時仍視為成功，避免影響正常流程
             
-            # 建立截止時間（今天 18:30）
-            cutoff_time = datetime.now().replace(
+            # 建立截止時間（今天 18:30，台灣時間）
+            now_tw = get_taiwan_now()
+            cutoff_time = now_tw.replace(
                 hour=CLOCK_OUT_CUTOFF_HOUR,
                 minute=CLOCK_OUT_CUTOFF_MINUTE,
                 second=0,
-                microsecond=0
+                microsecond=0,
             )
-            
+            punch_time = punch_time.replace(tzinfo=TAIWAN_TZ)
+
             if punch_time > cutoff_time:
                 logger.warning(
                     f"⚠️ 下班打卡時間 {punch_time.strftime('%H:%M:%S')} "
@@ -434,7 +452,7 @@ class WorkdoAPI:
             logger.info("🗓️ 查詢假日列表...")
             
             # 查詢今年度假日
-            current_year = datetime.now().year
+            current_year = get_taiwan_now().year
             query_data = {
                 'year': current_year
             }
@@ -481,7 +499,7 @@ class WorkdoAPI:
             logger.info("🔄 開始從 Workdo API 更新假日資料...")
             
             # 查詢今年度假日
-            current_year = datetime.now().year
+            current_year = get_taiwan_now().year
             query_data = {
                 'year': current_year
             }
@@ -597,7 +615,7 @@ class WorkdoAPI:
             logger.info("🔄 從台灣公開日曆數據源更新假日資料...")
             
             # 查詢今年度假日
-            current_year = datetime.now().year
+            current_year = get_taiwan_now().year
             calendar_url = self.TAIWAN_CALENDAR_URL.format(year=current_year)
             
             logger.info(f"🗓️ 查詢 {current_year} 年度台灣假日...")
@@ -752,7 +770,7 @@ class WorkdoAPI:
     
     def is_holiday(self):
         """檢查今天是否為假日（週末 / leave_days.json / 台灣行事曆 / Workdo 假日 API 並用）"""
-        now = datetime.now()
+        now = get_taiwan_now()
         today = now.strftime('%Y-%m-%d')
         
         # 檢查週末
@@ -903,9 +921,18 @@ def main():
             sys.exit(0)
     
     # 執行對應動作
+    punch_ok = True
     if args.action == 'in':
         # 上班打卡
         now_tw = get_taiwan_now()
+        if is_before_clock_in_start(now_tw):
+            logger.warning(
+                f"⛔ 目前台灣時間 {now_tw.strftime('%H:%M:%S')} "
+                f"尚未到上班打卡開始時間 {CLOCK_IN_START_HOUR:02d}:{CLOCK_IN_START_MINUTE:02d}，"
+                f"放棄本次上班打卡。"
+            )
+            workdo.get_punch_status()
+            sys.exit(0)
         if is_past_clock_in_safe_cutoff(now_tw):
             logger.warning(
                 f"⛔ 目前台灣時間 {now_tw.strftime('%H:%M:%S')} "
@@ -918,7 +945,7 @@ def main():
         if workdo.has_punched_type_today('ClockIn'):
             logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
         else:
-            workdo.clock_in()
+            punch_ok = workdo.clock_in()
         workdo.get_punch_status()
         
     elif args.action == 'out':
@@ -944,7 +971,7 @@ def main():
         if workdo.has_punched_type_today('ClockOut'):
             logger.info("ℹ️ 今日已完成下班打卡，略過重複執行")
         else:
-            workdo.clock_out()
+            punch_ok = workdo.clock_out()
         workdo.get_punch_status()
         
     elif args.action == 'status':
@@ -1014,7 +1041,13 @@ def main():
         # 上班打卡：8:00-9:00（含 9:00），對齊「排程 08:00、截止 09:00」之防護機制
         if 800 <= current_time <= 900:
             logger.info(f"🌅 早上時段 ({current_hour:02d}:{current_minute:02d})，執行上班打卡")
-            if is_past_clock_in_safe_cutoff(now):
+            if is_before_clock_in_start(now):
+                logger.warning(
+                    f"⛔ 目前台灣時間 {now.strftime('%H:%M:%S')} "
+                    f"尚未到上班打卡開始時間 {CLOCK_IN_START_HOUR:02d}:{CLOCK_IN_START_MINUTE:02d}，"
+                    f"放棄本次上班打卡。"
+                )
+            elif is_past_clock_in_safe_cutoff(now):
                 logger.warning(
                     f"⛔ 目前台灣時間 {now.strftime('%H:%M:%S')} "
                     f"已超過上班打卡安全截止時間 {CLOCK_IN_SAFE_CUTOFF_HOUR:02d}:{CLOCK_IN_SAFE_CUTOFF_MINUTE:02d}"
@@ -1024,7 +1057,7 @@ def main():
             elif workdo.has_punched_type_today('ClockIn'):
                 logger.info("ℹ️ 今日已完成上班打卡，略過重複執行")
             else:
-                workdo.clock_in()
+                punch_ok = workdo.clock_in()
         # 下班打卡：18:00-18:30（含 18:30），對齊「排程 18:00、截止 18:30」之防護機制
         elif 1800 <= current_time <= 1830:
             logger.info(f"🌆 傍晚時段 ({current_hour:02d}:{current_minute:02d})，執行下班打卡")
@@ -1039,7 +1072,7 @@ def main():
             elif workdo.has_punched_type_today('ClockOut'):
                 logger.info("ℹ️ 今日已完成下班打卡，略過重複執行")
             else:
-                workdo.clock_out()
+                punch_ok = workdo.clock_out()
         else:
             logger.info(f"⏰ 目前時間 {current_hour:02d}:{current_minute:02d} 不在打卡時段內（上班: 8:00-9:00, 下班: 18:00-18:30）")
         
@@ -1047,6 +1080,10 @@ def main():
     
     logger.info("✨ 執行完成")
     logger.info(f"⏱️  程式總執行時間: {get_elapsed_time():.2f} 秒")
+
+    if args.action in ('in', 'out', 'auto') and not punch_ok:
+        logger.error("❌ 打卡未成功完成")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
